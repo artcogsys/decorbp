@@ -12,13 +12,11 @@ from torch import Tensor
 
 def get_model(model, input_channels, image_size):
 
-    # we focus on image denoising. Reason is that this allows us to easily generalise to GANs, diffusion models, etc.
+    # we focus on autoencoding / image denoising. Reason is that this allows us to easily generalise to GANs, diffusion models, etc.
     # can be easily adapted to other problems by changing the model output and loss function
-    if model == 'MLP': # Could be autoencoder
-       return MLP(
+    if model == 'MLP_AUTOENCODER':
+       return MLP_AUTOENCODER(
             input_dim=input_channels*image_size**2,
-            # output_dim=10
-            # output_dim=FLAGS.channels*FLAGS.image_size**2
         )
     elif model == 'UNet':      
         return UNet(
@@ -29,7 +27,114 @@ def get_model(model, input_channels, image_size):
     else:
         raise ValueError(f'Unrecognized dataset {model}')
 
-## UTILS
+# class DecorrelatedModel(torch.Module):
+#     def __init__(self, decorrelators):
+#         self.decorrelators = decorrelators
+
+
+## Decorrelating transform
+
+class Decor(nn.Module):
+    """
+    A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
+    """
+
+    def __init__(self, in_features, lr):   
+        super().__init__()
+        self.lr = lr
+        self.R = torch.nn.parameter.Parameter(torch.eye(in_features), requires_grad=False)
+        self.neg_eye = torch.nn.parameter.Parameter(1.0 - torch.eye(in_features), requires_grad=False)
+
+    def forward(self, input: Tensor) -> Tensor:
+        
+        # decorrelate flattened input
+        output = torch.einsum('ni,ij->nj', input.view(len(input), -1), self.R)
+       
+        # update parameters
+        with torch.no_grad():
+            corr = (1/len(output))*torch.einsum('ni,nj->ij', output, output) * self.neg_eye
+            self.R -= self.lr * torch.einsum('ij,jk->ik', corr, self.R)
+
+        # debug
+        # print(f'cor: {torch.mean(corr[torch.tril_indices(len(output), len(output), offset=1)])}')
+
+        return output.view(input.shape)
+    
+        
+# Also consider MLPMixer as in https://docs.kidger.site/equinox/examples/score_based_diffusion/
+# Also see: https://arxiv.org/abs/2105.01601
+    
+
+## MLP 
+
+# class MLP_AUTOENCODER(nn.Module):
+#     """
+#     MLP AUTOENCODER
+#     """
+    
+#     def __init__(self, input_dim):
+#         super().__init__()
+#         self.input_fc = nn.Linear(input_dim, 250)
+#         self.hidden_fc = nn.Linear(250, 100)
+#         self.output_fc = nn.Linear(100, input_dim)
+
+#         self.decor_input_fc = Decor(input_dim)
+#         self.decor_input_fc2 = Decor(250)
+
+#     def forward(self, x, time=None):
+
+#         # we completely ignore the positional embedding
+#         del time
+
+#         input_shape = x.shape
+
+#         x = x.view(x.shape[0], -1)
+
+#         h_1 = F.relu(self.input_fc(self.decor_input_fc(x)))
+
+#         h_2 = F.relu(self.hidden_fc(self.decor_input_fc2(h_1)))
+
+#         y_pred = self.output_fc(h_2)
+
+#         return torch.reshape(y_pred, input_shape)
+    
+#     def input_correlation(self, input):
+
+#         x = self.decor_input_fc(input)
+#         C = (x @ x.T) / len(x)
+#         return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
+    
+
+class MLP_AUTOENCODER(nn.Sequential):
+
+    def __init__(self, input_dim):
+        super().__init__(Decor(input_dim, lr=1e-3),
+                         nn.Linear(input_dim, 250),
+                         nn.ReLU(),
+                         Decor(250, lr=1e-3),
+                         nn.Linear(250, 100),
+                         nn.ReLU(),
+                         Decor(100, lr=1e-3),
+                         nn.Linear(100, input_dim)
+                         )
+
+    def forward(self, x):
+        return super().forward(x.view(len(x), -1)).view(x.shape)
+
+    def set_decorrelation_learning_rate(self, lr):
+        for m in self:
+            if isinstance(m, Decor):
+                m.lr = lr
+
+#     # def input_correlation(self, input):
+
+#     #     x = self.decor_input_fc(input)
+#     #     C = (x @ x.T) / len(x)
+#     #     return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
+
+
+
+## UNet
 
 def exists(x):
     return x is not None
@@ -39,83 +144,6 @@ def default(val, d):
         return val
     return d() if isfunction(d) else d
 
-## Decorrelating transform
-
-class Decor(nn.Module):
-
-    def __init__(self, in_features, device=None, dtype=None, **kwargs) -> None:        
-        super().__init__()
-        self.R = torch.nn.parameter.Parameter(torch.eye(in_features), requires_grad=False)
-        self.neg_eye = torch.nn.parameter.Parameter(1.0 - torch.eye(in_features), requires_grad=False)
-
-    def forward(self, input: Tensor) -> Tensor:
-        
-
-        # decorrelate flattened input
-        output = torch.einsum('ni,ij->nj', input.view(len(input), -1), self.R)
-
-        corr = (1/len(output))*torch.einsum('ni,nj->ij', output, output) * self.neg_eye
-
-        # debug
-        # print(f'cor: {torch.mean(corr[torch.tril_indices(len(output), len(output), offset=1)])}')
-       
-        # update parameters
-        update = torch.einsum('ij,jk->ik', corr, self.R)
-        self.R -= 1e-3 * update
-
-        return output.view(input.shape)
-
-        # print(self.R[0,0])
-        # C = input @ input.T
-        # print(f'C: {torch.mean(C[torch.tril_indices(len(input), len(input), offset=1)])}')
-
-        
-    
-
-## MLP 
-
-# Also consider MLPMixer as in https://docs.kidger.site/equinox/examples/score_based_diffusion/
-# Also see: https://arxiv.org/abs/2105.01601
-class MLP(nn.Module):
-    """
-    MLP AUTOENCODER
-    """
-    
-    def __init__(self, input_dim):
-        super().__init__()
-        self.input_fc = nn.Linear(input_dim, 250)
-        self.hidden_fc = nn.Linear(250, 100)
-        self.output_fc = nn.Linear(100, input_dim)
-
-        self.decor_input_fc = Decor(input_dim)
-
-    def forward(self, x, time=None):
-
-        # we completely ignore the positional embedding
-        del time
-
-        input_shape = x.shape
-
-        x = x.view(x.shape[0], -1)
-
-        h_1 = F.relu(self.input_fc(self.decor_input_fc(x)))
-
-        h_2 = F.relu(self.hidden_fc(h_1))
-
-        y_pred = self.output_fc(h_2)
-
-        return torch.reshape(y_pred, input_shape)
-    
-    def input_correlation(self, input):
-
-        x = self.decor_input_fc(input)
-        C = (x @ x.T) / len(x)
-        return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
-
-
-
-## UNet
-  
 class Residual(nn.Module):
     def __init__(self, fn):
         super().__init__()

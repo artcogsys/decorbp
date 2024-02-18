@@ -3,7 +3,7 @@ from torchvision import transforms
 from torchvision.datasets import CIFAR10, MNIST, VOCSegmentation
 from typing import Any, Callable, List, Optional, Tuple
 
-class AUTOENCODER():
+class Autoencoder():
 
     def __init__(self, dataset):
         self.dataset = dataset
@@ -29,7 +29,7 @@ def get_task(task, batch_size, num_workers):
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
             ])
 
-        dataset = AUTOENCODER(CIFAR10(root='~/Data', train=True, download=True, transform=transform))
+        dataset = Autoencoder(CIFAR10(root='~/Data', train=True, download=True, transform=transform))
         
         lossfun = torch.nn.MSELoss()
     
