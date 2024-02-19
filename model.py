@@ -39,11 +39,20 @@ class Decor(nn.Module):
     A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
     """
 
+    lr: float
+    in_features: int
+    
     def __init__(self, in_features, lr):   
         super().__init__()
         self.lr = lr
-        self.R = torch.nn.parameter.Parameter(torch.eye(in_features), requires_grad=False)
-        self.neg_eye = torch.nn.parameter.Parameter(1.0 - torch.eye(in_features), requires_grad=False)
+        self.in_features = in_features
+
+        # self.R = torch.eye(in_features) #torch.nn.parameter.Parameter(torch.eye(in_features)) #, requires_grad=False)
+        # self.register_buffer('R', self.R, persistent=True)
+        self.register_buffer('R', torch.eye(in_features))
+
+        self.register_buffer('neg_eye', 1.0 - torch.eye(self.in_features))
+        # self.neg_eye = torch.nn.parameter.Parameter(1.0 - torch.eye(in_features), requires_grad=False)
 
     def forward(self, input: Tensor) -> Tensor:
         
@@ -51,9 +60,9 @@ class Decor(nn.Module):
         output = torch.einsum('ni,ij->nj', input.view(len(input), -1), self.R)
        
         # update parameters
-        with torch.no_grad():
-            corr = (1/len(output))*torch.einsum('ni,nj->ij', output, output) * self.neg_eye
-            self.R -= self.lr * torch.einsum('ij,jk->ik', corr, self.R)
+        # with torch.no_grad():
+        corr = (1/len(output))*torch.einsum('ni,nj->ij', output, output) * self.neg_eye
+        self.R -= self.lr * torch.einsum('ij,jk->ik', corr, self.R)
 
         # debug
         # print(f'cor: {torch.mean(corr[torch.tril_indices(len(output), len(output), offset=1)])}')

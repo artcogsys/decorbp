@@ -35,7 +35,7 @@ def train_loop(epochs, model, lossfun, train_loader, optimizer,device):
 
                 L[epoch] += loss.item()
 
-                if epoch > 0:
+                if epoch >= 0: # DEBUGGING >=
                     loss.backward()
                     optimizer.step()
 
