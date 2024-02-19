@@ -10,6 +10,7 @@ from torch import nn, einsum
 import torch.nn.functional as F
 from torch import Tensor
 
+
 def get_model(model, input_channels, image_size):
 
     # we focus on autoencoding / image denoising. Reason is that this allows us to easily generalise to GANs, diffusion models, etc.
@@ -32,42 +33,6 @@ def get_model(model, input_channels, image_size):
 #         self.decorrelators = decorrelators
 
 
-## Decorrelating transform
-
-class Decor(nn.Module):
-    """
-    A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
-    """
-
-    lr: float
-    in_features: int
-    
-    def __init__(self, in_features, lr):   
-        super().__init__()
-        self.lr = lr
-        self.in_features = in_features
-
-        # self.R = torch.eye(in_features) #torch.nn.parameter.Parameter(torch.eye(in_features)) #, requires_grad=False)
-        # self.register_buffer('R', self.R, persistent=True)
-        self.register_buffer('R', torch.eye(in_features))
-
-        self.register_buffer('neg_eye', 1.0 - torch.eye(self.in_features))
-        # self.neg_eye = torch.nn.parameter.Parameter(1.0 - torch.eye(in_features), requires_grad=False)
-
-    def forward(self, input: Tensor) -> Tensor:
-        
-        # decorrelate flattened input
-        output = torch.einsum('ni,ij->nj', input.view(len(input), -1), self.R)
-       
-        # update parameters
-        # with torch.no_grad():
-        corr = (1/len(output))*torch.einsum('ni,nj->ij', output, output) * self.neg_eye
-        self.R -= self.lr * torch.einsum('ij,jk->ik', corr, self.R)
-
-        # debug
-        # print(f'cor: {torch.mean(corr[torch.tril_indices(len(output), len(output), offset=1)])}')
-
-        return output.view(input.shape)
     
         
 # Also consider MLPMixer as in https://docs.kidger.site/equinox/examples/score_based_diffusion/

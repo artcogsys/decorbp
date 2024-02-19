@@ -10,9 +10,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": [
-                "--flagfile",
-                "./config/CIFAR10.txt"           ]
+            "args": ["@config/test.txt"]
         }
     ]
 }
