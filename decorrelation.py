@@ -149,9 +149,9 @@ class DecorrelationPatch2d(torch.nn.Module):
     def update(self):
         self.R.grad = torch.einsum('ij,jk->ik', self.correlation(self.output) - self.eye, self.R)
 
-    def flatten(self, x):
-        z = self.fold(x) / self.divisor
-        return z.view(z.shape[0],-1)
+    # def flatten(self, x):
+    #     z = self.fold(x) / self.divisor
+    #     return z.view(z.shape[0],-1)
 
     # def mean_correlation(self):
     #     C = self.correlation(self.output)

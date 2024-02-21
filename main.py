@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import argparse
 from experiment import get_experiment
-from decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update, mean_correlation, lower_triangular_correlation, DecorrelationPatch2d, DecorrelationFC
+from decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update, mean_correlation
 from utils import *
 
 def parse_arguments():
