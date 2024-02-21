@@ -1,0 +1,453 @@
+import torch
+from torch import nn
+import torch.nn.functional as F
+from torch import Tensor
+import numpy as np
+from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
+from torch.nn.modules.utils import _pair
+
+def decorrelation_modules(model: torch.nn.Module):
+    """Returns all decorrelation modules
+    """
+
+    def get_modules(model: torch.nn.Module):
+        children = list(model.children())
+        return [model] if len(children) == 0 else [ci for c in children for ci in get_modules(c)]
+
+    return list(filter(lambda m: isinstance(m, Decorrelation), get_modules(model)))
+
+def decorrelation_parameters(model: torch.nn.Module):
+    """Returns all decorrelation parameters
+    """
+    return list(map(lambda m: m.R, decorrelation_modules(model)))
+
+def decorrelation_update(modules):
+    """Updates all decorrelation modules
+    """
+    for m in modules:
+        m.update()     
+
+def mean_correlation(modules):
+    """Computes average off-diagonal output decorrelation across modules
+    """
+    corr = 0.0
+    for idx, m in enumerate(modules):
+        corr += m.mean_correlation()
+    return corr / idx
+
+class Decorrelation(nn.Module):
+
+    # def __init__(device=None, dtype=None):
+    #     factory_kwargs = {'device': device, 'dtype': dtype}
+    #     super().__init__(**factory_kwargs)
+
+    def forward(self, input: Tensor) -> Tensor:
+        raise NotImplementedError
+    
+    def update(self):
+        raise NotImplementedError
+
+
+class DecorrelationFC(Decorrelation):
+    r"""A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
+    """
+
+    __constants__ = ['in_features']
+    in_features: int
+
+    def __init__(self, in_features: int, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__()
+
+        self.in_features = in_features
+        self.register_buffer('R', torch.eye(self.in_features, **factory_kwargs))
+        self.register_buffer('output', torch.zeros(self.in_features, **factory_kwargs))
+        self.register_buffer('eye', torch.eye(self.in_features, **factory_kwargs))
+
+    def reset_parameters(self) -> None:
+        nn.init.eye(self.R)
+        nn.init.zeros(self.output)
+
+    def forward(self, input: Tensor) -> Tensor:
+        self.output = F.linear(input.view(len(input), -1), self.R) # do we need to add grad info here? See conv
+        return self.output.view(input.shape)
+
+    def extra_repr(self) -> str:
+        return f'in_features={self.in_features}'
+
+    def correlation(self):
+        return torch.einsum('ni,nj->ij', self.output, self.output) / len(self.output)
+    
+    def update(self):
+        self.R.grad = torch.einsum('ij,jk->ik', self.correlation() - self.eye, self.R)
+
+    def mean_correlation(self):
+        C = self.correlation()
+        return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
+    
+
+# #### 2D CONV
+
+# """
+# Options:
+#     - patchwise decorrelation as we do now
+#     - patchwise with separate R for each patch
+#     - patchwise but map back to original (averaged input); advantage is separate decorrelating conv module
+#     - expand the whole input and globally decorrelate and reshape back (extreme case of the naive approach); possibly combined with factorization...; advantage is separate decorrelating conv module
+# """
+
+# ## We first implement the patchwise approach of Sander
+
+class DecorrelationPatch2d(torch.nn.Module):
+
+    def __init__(self,
+                in_channels: int,
+                kernel_size: _size_2_t,
+                device=None,
+                dtype=None) -> None:
+
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.kernel_size = kernel_size
+
+        self.patch_length = in_channels * np.prod(kernel_size) # number of elements in a patch to be represented as channels
+        self.unfold = torch.nn.Unfold(kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
+
+        self.register_buffer('R', torch.eye(self.patch_length, **factory_kwargs))
+        self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
+
+    def forward(self, input: Tensor) -> Tensor:
+
+        z = self.unfold(input) # [N, C*H*W, P]
+        self.output = torch.einsum('nij,ik->nij', z, self.R) # decorrelated patches [N, C*H*W, P]
+
+        # transform back to tensor dimensions
+
+        # needs to be generated on the fly size we don't know the output size of this layer in advance; we could store this after first call
+        fold = torch.nn.Fold(output_size=input.shape[-2:], kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
+        divisor = fold(self.unfold(torch.ones_like(input)))
+
+        return fold(self.output) / divisor
+
+    def correlation(self):
+        return torch.einsum('nip,njp->ij', self.output, self.output) / (self.output.shape[0] * self.output.shape[2])
+    
+    def update(self):
+        self.R.grad = torch.einsum('ij,jk->ik', self.correlation() - self.eye, self.R)
+
+    def mean_correlation(self):
+        C = self.correlation()
+        return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
+    
+
+#         self.weight.requires_grad_(False)  # deregister since we use a custom update
+
+#     def forward(self, input: Tensor) -> Tensor:
+        
+#         weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1),
+#                                             self.weight.flip(-1, -2), # forward_conv.
+#                                             padding=0).moveaxis(0, 1)
+        
+#         self.output = torch.nn.functional.conv2d(input, 
+#                                                  weight,
+#                                                  stride=self.stride,
+#                                                  dilation=self.dilation,
+#                                                  padding=self.padding)
+        
+#         self.output.requires_grad_(True) # WHY HERE; ALSO FOR LINEAR?...
+#         self.output.retain_grad()
+
+#         return self.output
+    
+
+# class Decorrelation2dNaive(nn.Conv2d):
+#     """Naive approach where we locally decorrelate and then use that is input to a regular convolution. We decorrelate all elements of a kernel block and then only keep the central element
+#        per channel.
+
+#     """
+
+#     def __init__(self, in_channels: int, kernel_size: _size_2_t, device=None, dtype=None):
+
+#         factory_kwargs = {'device': device, 'dtype': dtype}
+
+#         super().__init__(in_channels=in_channels,
+#                          out_channels=in_channels,
+#                          kernel_size=(1, 1),
+#                          stride=(1, 1),
+#                          padding=0,
+#                          dilation=(1, 1),
+#                          bias=False,
+#                          **factory_kwargs)       
+
+#         self.weight.requires_grad_(False)  # deregister since we use a custom update
+
+#     def forward(self, input: Tensor) -> Tensor:
+        
+        
+#         return super().forward(input)
+
+
+#         # weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1),
+#         #                                     self.weight.flip(-1, -2), # forward_conv.
+#         #                                     padding=0).moveaxis(0, 1)
+        
+#         # self.output = torch.nn.functional.conv2d(input, 
+#         #                                          weight,
+#         #                                          stride=self.stride,
+#         #                                          dilation=self.dilation,
+#         #                                          padding=self.padding)
+        
+#         # self.output.requires_grad_(True) # WHY HERE; ALSO FOR LINEAR?...
+#         # self.output.retain_grad()
+
+#         # return self.output
+    
+
+
+
+# # class Decorrelation2d(nn.Conv2d):
+
+# #     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t, device=None, dtype=None):
+
+# #         factory_kwargs = {'device': device, 'dtype': dtype}
+# #         self.patch_length = in_channels * np.prod(kernel_size)
+
+# #         super().__init__(in_channels=self.patch_length,
+# #                         out_channels=out_channels,
+# #                         kernel_size=(1, 1),
+# #                         stride=(1, 1),
+# #                         padding=0,
+# #                         dilation=(1, 1),
+# #                         bias=False,
+# #                         **factory_kwargs)
+
+# #         self.weight.requires_grad_(False)  # deregister since we use a custom update
+
+# #     def forward(self, input: Tensor) -> Tensor:
+        
+# #         weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1),
+# #                                             self.weight.flip(-1, -2), # forward_conv.
+# #                                             padding=0).moveaxis(0, 1)
+        
+# #         self.output = torch.nn.functional.conv2d(input, 
+# #                                                  weight,
+# #                                                  stride=self.stride,
+# #                                                  dilation=self.dilation,
+# #                                                  padding=self.padding)
+        
+# #         self.output.requires_grad_(True) # WHY HERE; ALSO FOR LINEAR?...
+# #         self.output.retain_grad()
+
+# #         return self.output
+
+
+# class CopiConv2d(nn.Conv2d):
+
+#     def __init__(self,
+#         in_channels: int,
+#         out_channels: int,
+#         kernel_size: _size_2_t,
+#         stride: _size_2_t = 1,
+#         padding: _size_2_t = 0,
+#         dilation: _size_2_t = 1,
+#         alpha = 1,
+#         device=None,
+#         dtype=None) -> None:
+
+#         self.patch_length = in_channels * np.prod(kernel_size)
+
+#         super().__init__(in_channels=in_channels,
+#                          out_channels=out_channels,
+#                          kernel_size=kernel_size,
+#                          stride=stride,
+#                          padding=padding,
+#                          dilation=dilation,
+#                          bias=False,
+#                          dtype=dtype,
+#                          device=device)
+
+#         self.weight.requires_grad_(False)  # deregister since we update using copi
+
+#         self.in_channels = in_channels
+#         self.out_channels = out_channels
+#         self.kernel_size = _pair(kernel_size)
+#         self.stride = _pair(stride)
+#         self.padding = _pair(padding)
+#         self.dilation = _pair(dilation)
+#         self.alpha = alpha
+#         self.input = None
+#         self.output_shape = None
+
+#     # def forward(self, x):
+#     #     self.input = x
+#     #     self.output = super().forward(x)
+#     #     self.output.requires_grad_(True)
+#     #     self.output.retain_grad()
+#     #     return self.output
+
+#     def get_target(self):
+
+#         # negative gradient as error signal
+#         perturbation = -self.output.grad
+#         self.output.grad = None
+
+#         # compute target activation
+#         return self.output + self.alpha * perturbation
+
+#     def copi_update(self, normalize=False, **kwargs):
+
+#         target = self.get_target()
+#         x = self.input
+
+#         target = target.moveaxis(1, 3)
+#         target = target.reshape(-1, self.out_channels)
+
+#         corr = (1 / len(x)) * torch.einsum('ki,kj->ij', target, x)
+
+#         weight = self.weight
+#         weight = weight.reshape(-1, np.prod(weight.shape[1:]))
+
+#         decay = torch.einsum('j,ij->ij', torch.mean(x ** 2, axis=0), weight)
+#         update = corr - decay
+#         update = update.reshape(self.weight.shape)
+
+#         #if normalize:
+#         #    update *= corr.shape[1] * multiplier
+
+#         self.weight.grad = -update
+
+#     def copi_parameters(self):
+#         return [self.weight]
+
+
+# class DecorConv2d(nn.Conv2d):
+#     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
+#                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1, bias: bool = False,
+#                  copi=False, weight=None, alpha: float = 1.0,
+#                  device=None, dtype=None) -> None:
+
+#         self.patch_length = in_channels * np.prod(kernel_size)
+
+#         super().__init__(
+#             in_channels=in_channels,
+#             out_channels=self.patch_length,
+#             kernel_size=kernel_size,
+#             stride=stride,
+#             padding=padding,
+#             dilation=dilation,
+#             bias=False,
+#             dtype=dtype,
+#             device=device
+#         )
+
+#         self.copi = copi
+#         if self.copi:
+#             self.forward_conv = CopiConv2d(in_channels=self.patch_length,
+#                                            out_channels=out_channels,
+#                                            kernel_size=(1, 1),
+#                                            stride=(1, 1),
+#                                            padding=0,
+#                                            dilation=(1, 1),
+#                                            alpha=alpha,
+#                                            dtype=dtype,
+#                                            device=device)
+
+#         else:
+#             self.forward_conv = nn.Conv2d(in_channels=self.patch_length,
+#                                           out_channels=out_channels,
+#                                           kernel_size=(1, 1),
+#                                           stride=(1, 1),
+#                                           padding=0,
+#                                           dilation=(1, 1),
+#                                           bias=bias is not None,
+#                                           dtype=dtype,
+#                                           device=device)
+
+
+#             # weight_shape = self.forward_conv.weight.shape
+#             # self.forward_conv.weight.data = weight.data.reshape(weight_shape)
+#             # if bias is not None:
+#             #     bias_shape = self.forward_conv.bias.shape
+#             #     self.forward_conv.bias.data = bias.data.reshape(bias_shape)
+
+#         self.weight.requires_grad_(False)
+
+#         self.input = None
+
+#         self.neg_eye = torch.nn.parameter.Parameter(1.0 - torch.eye(self.patch_length), requires_grad=False)
+#         self.eye = torch.nn.parameter.Parameter(torch.eye(self.patch_length), requires_grad=False)
+#         self.decor_losses = []
+
+#     def reset_parameters(self) -> None:
+#         w_square = self.weight.reshape(self.patch_length, self.patch_length)
+#         w_square = torch.nn.init.eye_(w_square)
+#         self.weight = torch.nn.Parameter(w_square.reshape(self.patch_length, self.in_channels, * self.kernel_size))
+
+#     def forward(self, x: Tensor) -> Tensor:
+#         self.input = x
+#         weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1), self.forward_conv.weight.flip(-1, -2),
+#                                                  padding=0).moveaxis(0, 1)
+#         self.forward_conv.output = torch.nn.functional.conv2d(x, weight,
+#                                          stride=self.stride,
+#                                          dilation=self.dilation,
+#                                          padding=self.padding)
+#         self.forward_conv.output.requires_grad_(True)
+#         self.forward_conv.output.retain_grad()
+#         return self.forward_conv.output
+        
+
+#     def copi_update(self, bio_copi=False, whiten=False, normalize=False, debug=False, downsample_perc=.05, **kwargs):
+
+#         # Decor update
+#         sample_size = int(len(self.input)*downsample_perc)
+#         x = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
+#         x = x.moveaxis(1, 3)
+
+#         x = x.reshape(-1, self.patch_length)
+
+#         # Double downsample. Actually doesn't seem to have much of a speedup effect
+#         # sample_size = int(len(x) * .05)
+#         # print(x.shape)
+#         # x = x[np.random.choice(np.arange(len(x)), sample_size)]
+#         # print(x.shape)
+
+#         if whiten:
+#             corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) - self.eye
+#         else:
+#             corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) * self.neg_eye
+
+#         if debug:
+#             decor_loss = torch.mean(torch.abs(corr))
+#             self.decor_losses.append(decor_loss.item())
+
+#         weight = self.weight
+#         weight = weight.reshape(-1, np.prod(weight.shape[1:]))
+#         if bio_copi:
+#             decor_update = torch.einsum('ij,jk->ik', weight, corr)
+#         else:
+#             decor_update = torch.einsum('ij,jk->ik', corr, weight)
+
+#         decor_update = decor_update.reshape(self.weight.shape)
+
+#         # Normalize decor update
+#         if normalize:
+#             decor_update *= corr.shape[1]
+
+#         self.weight.grad = decor_update.clone()
+
+#         # Compute weight update if using COPI in stead of just decorrelated BP
+#         if self.copi:
+#             # We don't run the forward pass of this layer so we need to manually set its decorrelated input
+#             self.forward_conv.input = x
+#             self.forward_conv.copi_update(normalize=normalize)
+
+
+#     def copi_parameters(self):
+#         if self.copi:
+#             return [self.weight, self.forward_conv.weight]
+#         else:
+#             return [self.weight]
+        
+
