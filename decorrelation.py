@@ -27,13 +27,18 @@ def decorrelation_update(modules):
     for m in modules:
         m.update()     
 
+def lower_triangular_correlation(C):
+    """Returns average off-diagonal correlation
+    """
+    return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
+
 def mean_correlation(modules):
     """Computes average off-diagonal output decorrelation across modules
     """
-    corr = 0.0
+    C = 0.0
     for idx, m in enumerate(modules):
-        corr += m.mean_correlation()
-    return corr / idx
+        C += lower_triangular_correlation(m.correlation(m.output))
+    return (C / (idx+1))
 
 class Decorrelation(nn.Module):
 
@@ -75,15 +80,16 @@ class DecorrelationFC(Decorrelation):
     def extra_repr(self) -> str:
         return f'in_features={self.in_features}'
 
-    def correlation(self):
-        return torch.einsum('ni,nj->ij', self.output, self.output) / len(self.output)
+    @staticmethod
+    def correlation(x):
+        return torch.einsum('ni,nj->ij', x, x) / len(x)
     
     def update(self):
-        self.R.grad = torch.einsum('ij,jk->ik', self.correlation() - self.eye, self.R)
+        self.R.grad = torch.einsum('ij,jk->ik', self.correlation(self.output) - self.eye, self.R)
 
-    def mean_correlation(self):
-        C = self.correlation()
-        return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
+    # def mean_correlation(self):
+    #     C = self.correlation(self.output)
+    #     return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
     
 
 # #### 2D CONV
@@ -115,31 +121,41 @@ class DecorrelationPatch2d(torch.nn.Module):
         self.patch_length = in_channels * np.prod(kernel_size) # number of elements in a patch to be represented as channels
         self.unfold = torch.nn.Unfold(kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
 
+        self.fold = None
+        self.divisor = None
+
         self.register_buffer('R', torch.eye(self.patch_length, **factory_kwargs))
         self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
 
     def forward(self, input: Tensor) -> Tensor:
 
+        # transform from tensor to patch representation
         z = self.unfold(input) # [N, C*H*W, P]
+
+        # apply decorrelating transform
         self.output = torch.einsum('nij,ik->nij', z, self.R) # decorrelated patches [N, C*H*W, P]
 
-        # transform back to tensor dimensions
+        # transform from patch to tensor representation
+        if self.fold is None: # we only compute this once
+            self.fold = torch.nn.Fold(output_size=input.shape[-2:], kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
+            self.divisor = self.fold(self.unfold(torch.ones_like(input)))
 
-        # needs to be generated on the fly size we don't know the output size of this layer in advance; we could store this after first call
-        fold = torch.nn.Fold(output_size=input.shape[-2:], kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
-        divisor = fold(self.unfold(torch.ones_like(input)))
+        return self.fold(self.output) / self.divisor # [N, C, H, W]
 
-        return fold(self.output) / divisor
-
-    def correlation(self):
-        return torch.einsum('nip,njp->ij', self.output, self.output) / (self.output.shape[0] * self.output.shape[2])
+    @staticmethod
+    def correlation(x):
+        return torch.einsum('nip,njp->ij', x, x) / (x.shape[0] * x.shape[2])
     
     def update(self):
-        self.R.grad = torch.einsum('ij,jk->ik', self.correlation() - self.eye, self.R)
+        self.R.grad = torch.einsum('ij,jk->ik', self.correlation(self.output) - self.eye, self.R)
 
-    def mean_correlation(self):
-        C = self.correlation()
-        return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
+    def flatten(self, x):
+        z = self.fold(x) / self.divisor
+        return z.view(z.shape[0],-1)
+
+    # def mean_correlation(self):
+    #     C = self.correlation(self.output)
+    #     return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
     
 
 #         self.weight.requires_grad_(False)  # deregister since we use a custom update

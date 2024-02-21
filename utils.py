@@ -1,15 +1,15 @@
-"""
-Random Correlation matrix using the algorithm in LKJ 2009 (vine method based on a C-vine)
-https://www.sciencedirect.com/science/article/pii/S0047259X09000876
-Created on Wed Aug  2 09:09:02 2017
-@author: junpenglao
-"""
 import torch
 import numpy as np
 from scipy import stats
 
 def lkj_random(n, eta):
-    """Create an n x n correlation matrix with correlation controlled by eta
+    """
+    Random Correlation matrix using the algorithm in LKJ 2009 (vine method based on a C-vine)
+    https://www.sciencedirect.com/science/article/pii/S0047259X09000876
+    Created on Wed Aug  2 09:09:02 2017
+    @author: junpenglao
+
+    Creates an n x n correlation matrix with correlation controlled by eta
     """
     beta0 = eta - 1 + n/2
     shape = n * (n-1) // 2
@@ -30,3 +30,19 @@ def lkj_random(n, eta):
         P[i, k] = p
 
     return torch.Tensor(P)
+
+
+def factor(d, k=3):
+    """
+    Simple method to generate correlated data
+    """
+    W = torch.randn((d,k))
+    S = W @ W.T + torch.diag(torch.rand(d))
+    S = torch.diag(1./torch.sqrt(torch.diag(S))) * S * torch.diag(1./torch.sqrt(torch.diag(S)))
+    return S
+
+def cov(d, p=0.5):
+    """
+    Simple method to generate correlated data
+    """
+    return (1-p) * torch.eye(d) + p * torch.ones((d,d))

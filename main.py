@@ -4,8 +4,8 @@ import torch
 import numpy as np
 import argparse
 from experiment import get_experiment
-from decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update, mean_correlation, DecorrelationPatch2d
-from utils import lkj_random
+from decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update, mean_correlation, lower_triangular_correlation, DecorrelationPatch2d, DecorrelationFC
+from utils import *
 
 def parse_arguments():
 
@@ -91,18 +91,29 @@ if __name__ == '__main__':
     # a = fold(unfold(x))
     # xx = a / divisor
 
-    d = torch.distributions.MultivariateNormal(torch.zeros(800), lkj_random(800, 0.1))
+    import matplotlib.pyplot as plt 
+
+    d = torch.distributions.MultivariateNormal(torch.zeros(800), cov(800, p=0.9))
     x = d.sample((100,)).reshape(100,2,20,20)
+
+    plt.figure()
+    plt.imshow((x.view(100,-1) @ x.view(100,-1).T) / len(x))
+    plt.savefig("orig.png")
 
     model = DecorrelationPatch2d(2, kernel_size=(3,3))
 
-    for i in range(10):
+    plt.figure()
+    for i in range(100):
         y = model.forward(x)
         model.update()
-        model.R -= 1e-3 * model.R.grad
-        print(model.mean_correlation())
+        model.R -= 1e-2 * model.R.grad
+        # print(mean_correlation([model]).numpy()) # mean correlation over batches and patches
+        plt.subplot(10,10,i+1)
+        plt.imshow(model.correlation(model.output))
+        print(lower_triangular_correlation(DecorrelationFC.correlation(model.flatten(model.output))).numpy()) # mean correlation of the whole feature map
+    plt.savefig("debug.png")
 
-
+    # WE ACTUALLY WANT TO KNOW WHAT THE JOINT CORRELATION OF THE WHOLE MAP IS!
 
 
     # for i in range(2):
