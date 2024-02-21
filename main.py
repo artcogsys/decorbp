@@ -67,69 +67,20 @@ if __name__ == '__main__':
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
-    # # DEBUG
+    for i in range(2):
 
-    # d = torch.distributions.MultivariateNormal(torch.zeros(800), torch.eye(800))
-    # x = torch.reshape(d.sample(), (1,2,20,20))
+        if i == 0:
+            print('Decorrelated BP:')
+        else:
+            print('Regular BP:')
+            args.lr_decor = 0.0
 
-    # unfold = torch.nn.Unfold(kernel_size=3, dilation=1, padding=0, stride=1)
-    # z = unfold(x) # [1, 18, 324]
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed(args.seed)
+        np.random.seed(args.seed)
 
-    # # R = torch.ones((18,18))
+        model, lossfun, train_loader, test_loader = get_experiment(args, device)
 
-    # # zz = z.moveaxis(-2,-1).size() # [1, 324, 18]
-    # # decor = torch.einsum('nij,ik->nik', zz, R)
-
-    # # d = torch.einsum('nij,ik->nij', z, R) # [1, 18, 324] decorrelated (?)
-    # d = torch.einsum('nij,ik->nij', z, torch.eye(18)) # testing with eye
-
-    # fold = torch.nn.Fold(output_size=(20,20), kernel_size=3, dilation=1, padding=0, stride=1)
-
-    # dd = fold(d)
-
-    # divisor = fold(unfold(torch.ones_like(x)))
-    # a = fold(unfold(x))
-    # xx = a / divisor
-
-    import matplotlib.pyplot as plt 
-
-    d = torch.distributions.MultivariateNormal(torch.zeros(800), cov(800, p=0.9))
-    x = d.sample((100,)).reshape(100,2,20,20)
-
-    plt.figure()
-    plt.imshow((x.view(100,-1) @ x.view(100,-1).T) / len(x))
-    plt.savefig("orig.png")
-
-    model = DecorrelationPatch2d(2, kernel_size=(3,3))
-
-    plt.figure()
-    for i in range(100):
-        y = model.forward(x)
-        model.update()
-        model.R -= 1e-2 * model.R.grad
-        # print(mean_correlation([model]).numpy()) # mean correlation over batches and patches
-        plt.subplot(10,10,i+1)
-        plt.imshow(model.correlation(model.output))
-        print(lower_triangular_correlation(DecorrelationFC.correlation(model.flatten(model.output))).numpy()) # mean correlation of the whole feature map
-    plt.savefig("debug.png")
-
-    # WE ACTUALLY WANT TO KNOW WHAT THE JOINT CORRELATION OF THE WHOLE MAP IS!
-
-
-    # for i in range(2):
-
-    #     if i == 0:
-    #         print('Decorrelated BP:')
-    #     else:
-    #         print('Regular BP:')
-    #         args.lr_decor = 0.0
-
-    #     torch.manual_seed(args.seed)
-    #     torch.cuda.manual_seed(args.seed)
-    #     np.random.seed(args.seed)
-
-    #     model, lossfun, train_loader, test_loader = get_experiment(args, device)
-
-    #     model, L, C = train_loop(args, model, lossfun, train_loader)
+        model, L, C = train_loop(args, model, lossfun, train_loader)
 
     
