@@ -27,11 +27,6 @@ def decorrelation_update(modules):
     for m in modules:
         m.update()     
 
-# def lower_triangular_correlation(C):
-#     """Returns average off-diagonal correlation
-#     """
-#     return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
-
 def covariance(modules):
     """ This is the measure of interest. We return the mean off-diagonal absolute covariance and the mean variance
     """
@@ -63,18 +58,18 @@ class DecorrelationFC(Decorrelation):
     __constants__ = ['in_features']
     in_features: int
 
-    def __init__(self, in_features: int, device=None, dtype=None) -> None:
+    def __init__(self, in_features: int, whiten=False, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
 
         self.in_features = in_features
+        self.whiten = whiten
         self.register_buffer('R', torch.eye(self.in_features, **factory_kwargs))
-        # self.register_buffer('output', torch.zeros(self.in_features, **factory_kwargs))
         self.register_buffer('eye', torch.eye(self.in_features, **factory_kwargs))
+        self.register_buffer('neg_eye', 1.0 - torch.eye(self.in_features, **factory_kwargs))
 
     def reset_parameters(self) -> None:
         nn.init.eye(self.R)
-        # nn.init.zeros(self.output)
 
     def forward(self, input: Tensor) -> Tensor:
         self.output = F.linear(input.view(len(input), -1), self.R) # do we need to add grad info here? See conv
@@ -83,19 +78,16 @@ class DecorrelationFC(Decorrelation):
     @staticmethod
     def covariance(x):
         return torch.cov(x.T)
-    # torch.einsum('ni,nj->ij', x, x) / len(x)
     
     def update(self):
-        C = (1/ len(self.output)) * torch.einsum('ni,nj->ij', self.output, self.output) - self.eye
+        C = (1/ len(self.output)) * torch.einsum('ni,nj->ij', self.output, self.output)
+        if self.whiten:
+            C -= self.eye
+        else:
+            C *= self.neg_eye
         self.R.grad = torch.einsum('ij,jk->ik', C, self.R).clone() # NOTE: why was clone added in constence code?
         # self.R.grad = (self.R.grad + self.R.grad.T) / 2.0 # enforce symmetry
 
-    # def extra_repr(self) -> str:
-    #     return f'in_features={self.in_features}'
-
-    # def mean_correlation(self):
-    #     C = self.correlation(self.output)
-    #     return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
     
 
 # #### 2D CONV
