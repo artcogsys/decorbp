@@ -59,6 +59,11 @@ class DecorrelationFC(Decorrelation):
     in_features: int
 
     def __init__(self, in_features: int, whiten=False, device=None, dtype=None) -> None:
+        """"Params:
+            - in_features: number of inputs
+            - whiten: strength of whitening constraint (MOVE TO 0.0 = no whitening)
+        """
+
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
 
@@ -80,7 +85,7 @@ class DecorrelationFC(Decorrelation):
         return torch.cov(x.T)
     
     def update(self):
-        C = (1/ len(self.output)) * torch.einsum('ni,nj->ij', self.output, self.output)
+        C = torch.einsum('ni,nj->ij', self.output, self.output) / len(self.output)
         if self.whiten:
             C -= self.eye
         else:
@@ -107,6 +112,7 @@ class DecorrelationPatch2d(torch.nn.Module):
     def __init__(self,
                 in_channels: int,
                 kernel_size: _size_2_t,
+                whiten: bool = False,
                 device=None,
                 dtype=None) -> None:
 
@@ -115,6 +121,7 @@ class DecorrelationPatch2d(torch.nn.Module):
 
         self.in_channels = in_channels
         self.kernel_size = kernel_size
+        self.whiten = whiten
 
         self.patch_length = in_channels * np.prod(kernel_size) # number of elements in a patch to be represented as channels
         self.unfold = torch.nn.Unfold(kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
@@ -124,6 +131,7 @@ class DecorrelationPatch2d(torch.nn.Module):
 
         self.register_buffer('R', torch.eye(self.patch_length, **factory_kwargs))
         self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
+        self.register_buffer('neg_eye', 1.0 - torch.eye(self.patch_length, **factory_kwargs))
 
     def forward(self, input: Tensor) -> Tensor:
 
@@ -138,14 +146,25 @@ class DecorrelationPatch2d(torch.nn.Module):
             self.fold = torch.nn.Fold(output_size=input.shape[-2:], kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
             self.divisor = self.fold(self.unfold(torch.ones_like(input)))
 
+        # we could create a path mask and apply this. But there is likely a more direct route
+        # z = self.output
+        # self.fold(z)
+         
+        # BUT THIS SHOULD ALSO JUST WORK.. WHY NOT?
         return self.fold(self.output) / self.divisor # [N, C, H, W]
 
     @staticmethod
-    def correlation(x):
-        return torch.einsum('nip,njp->ij', x, x) / (x.shape[0] * x.shape[2])
+    def covariance(x):
+        return torch.cov(x.moveaxis(1,2).reshape(-1,x.shape[1]).T)
+        # return torch.einsum('nip,njp->ij', x, x) / (x.shape[0] * x.shape[2])
     
     def update(self):
-        self.R.grad = torch.einsum('ij,jk->ik', self.correlation(self.output) - self.eye, self.R)
+        C = torch.einsum('nip,njp->ij', self.output, self.output) / (self.output.shape[0] * self.output.shape[2]) # double check if this is correct
+        if self.whiten:
+            C -= self.eye
+        else:
+            C *= self.neg_eye
+        self.R.grad = torch.einsum('ij,jk->ik', C, self.R)
 
     # def flatten(self, x):
     #     z = self.fold(x) / self.divisor

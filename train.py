@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update, mean_correlation
+from decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update, covariance
 
 def train_loop(args, model, lossfun, train_loader, device):
 
@@ -9,8 +9,9 @@ def train_loop(args, model, lossfun, train_loader, device):
         decorrelators = decorrelation_modules(model)
         decor_optimizer = torch.optim.SGD(decorrelation_parameters(model), lr=args.lr_decor)
 
-        L = np.zeros(args.epochs+1)
-        C = np.zeros(args.epochs+1)
+        L = np.zeros(args.epochs+1) # loss
+        C = np.zeros(args.epochs+1) # off-diagonal mean abs covariance
+        V = np.zeros(args.epochs+1) # mean variance
         for epoch in range(args.epochs+1):
 
             for step, batch in enumerate(train_loader):
@@ -32,11 +33,15 @@ def train_loop(args, model, lossfun, train_loader, device):
                         decor_optimizer.step()
 
                 L[epoch] += loss.item()
-                C[epoch] += mean_correlation(decorrelators)
+
+                cov, var = covariance(decorrelators)
+                C[epoch] += cov
+                V[epoch] += var
             
             L[epoch] /= step
             C[epoch] /= step
+            V[epoch] /= step
 
-            print(f'epoch {epoch:<3}\tloss: {L[epoch]:3f}\tcorrelation: {C[epoch]:3f}')
+            print(f'epoch {epoch:<3}\tloss: {L[epoch]:3f}\tcov: {C[epoch]:3f}\tvar: {V[epoch]:3f}')
 
-        return model, L, C
+        return model, L, C, V
