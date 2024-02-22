@@ -27,24 +27,27 @@ def decorrelation_update(modules):
     for m in modules:
         m.update()     
 
-def lower_triangular_correlation(C):
-    """Returns average off-diagonal correlation
-    """
-    return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
+# def lower_triangular_correlation(C):
+#     """Returns average off-diagonal correlation
+#     """
+#     return torch.mean(C[torch.tril_indices(len(C), len(C), offset=1)])
 
-def mean_correlation(modules):
-    """Computes average off-diagonal output decorrelation across modules
+def covariance(modules):
+    """ This is the measure of interest. We return the mean off-diagonal absolute covariance and the mean variance
     """
-    C = 0.0
-    for idx, m in enumerate(modules):
-        C += lower_triangular_correlation(m.correlation(m.output))
-    return (C / (idx+1))
+    cov = 0.0
+    var = 0.0
+    for m in modules:
+        C = m.covariance(m.output)
+        cov += torch.mean(torch.abs(C[torch.tril_indices(len(C), len(C), offset=1)]))
+        var += torch.mean(torch.diag(C))
+    cov /= len(modules)
+    var /= len(modules)
+    return cov, var
 
 class Decorrelation(nn.Module):
-
-    # def __init__(device=None, dtype=None):
-    #     factory_kwargs = {'device': device, 'dtype': dtype}
-    #     super().__init__(**factory_kwargs)
+    """Abstract base class for decorrelation so we can identify decorrelation modules.
+    """
 
     def forward(self, input: Tensor) -> Tensor:
         raise NotImplementedError
@@ -66,26 +69,29 @@ class DecorrelationFC(Decorrelation):
 
         self.in_features = in_features
         self.register_buffer('R', torch.eye(self.in_features, **factory_kwargs))
-        self.register_buffer('output', torch.zeros(self.in_features, **factory_kwargs))
+        # self.register_buffer('output', torch.zeros(self.in_features, **factory_kwargs))
         self.register_buffer('eye', torch.eye(self.in_features, **factory_kwargs))
 
     def reset_parameters(self) -> None:
         nn.init.eye(self.R)
-        nn.init.zeros(self.output)
+        # nn.init.zeros(self.output)
 
     def forward(self, input: Tensor) -> Tensor:
         self.output = F.linear(input.view(len(input), -1), self.R) # do we need to add grad info here? See conv
         return self.output.view(input.shape)
 
-    def extra_repr(self) -> str:
-        return f'in_features={self.in_features}'
-
     @staticmethod
-    def correlation(x):
-        return torch.einsum('ni,nj->ij', x, x) / len(x)
+    def covariance(x):
+        return torch.cov(x.T)
+    # torch.einsum('ni,nj->ij', x, x) / len(x)
     
     def update(self):
-        self.R.grad = torch.einsum('ij,jk->ik', self.correlation(self.output) - self.eye, self.R)
+        C = (1/ len(self.output)) * torch.einsum('ni,nj->ij', self.output, self.output) - self.eye
+        self.R.grad = torch.einsum('ij,jk->ik', C, self.R).clone() # NOTE: why was clone added in constence code?
+        # self.R.grad = (self.R.grad + self.R.grad.T) / 2.0 # enforce symmetry
+
+    # def extra_repr(self) -> str:
+    #     return f'in_features={self.in_features}'
 
     # def mean_correlation(self):
     #     C = self.correlation(self.output)
