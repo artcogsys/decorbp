@@ -1,5 +1,5 @@
 import torch.nn as nn
-from decorrelation import DecorrelationFC
+from src.decorrelation import DecorrelationFC
 
 class MLP(nn.Sequential):
 
