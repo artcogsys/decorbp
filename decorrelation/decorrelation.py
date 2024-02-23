@@ -11,19 +11,11 @@ from typing import Optional
 def decorrelation_modules(model: nn.Module):
     """Returns the list of decorrelation modules
     """
-    return list(filter(lambda m: isinstance(m, Decorrelation), model.modules()))
-
-    # def get_modules(model: torch.nn.Module):
-    #     children = list(model.children())
-    #     return [model] if len(children) == 0 else [ci for c in children for ci in get_modules(c)]
-
-    # return list(filter(lambda m: isinstance(m, Decorrelation), get_modules(model)))
+    return list(filter(lambda m: isinstance(m, AbstractDecorrelation), model.modules()))
 
 def decorrelation_parameters(model: nn.Module):
     """Returns all decorrelation parameters as an iterable
     """
-    # return list(map(lambda m: m.R, decorrelation_modules(model)))
-    # return decorrelation_modules(model)
     return itertools.chain(*map( lambda m: m.parameters(), decorrelation_modules(model)))
 
 def decorrelation_update(modules):
@@ -50,7 +42,7 @@ def covariance(modules):
     var /= len(modules)
     return cov, var
 
-class Decorrelation(nn.Module):
+class AbstractDecorrelation(nn.Module):
     """Abstract base class for decorrelation so we can identify decorrelation modules.
     """
 
@@ -61,8 +53,12 @@ class Decorrelation(nn.Module):
         raise NotImplementedError
 
 
-class DecorFC(Decorrelation):
+class Decorrelation(AbstractDecorrelation):
     r"""A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
+
+    NOTE:
+    We combine this with a linear layer to implement the transformation. If the batch size is larger than the number of outputs it can be more 
+    efficient to combine this, as we do for the convolutions. On the other hand, we always need access to z=Rx so it may not matter...
     """
 
     __constants__ = ['in_features']
@@ -80,7 +76,6 @@ class DecorFC(Decorrelation):
         self.in_features = in_features
         self.whiten = whiten
         self.R = nn.Parameter(torch.eye(self.in_features, **factory_kwargs), requires_grad=False)
-        # self.register_buffer('R', torch.eye(self.in_features, **factory_kwargs))
         self.register_buffer('eye', torch.eye(self.in_features, **factory_kwargs))
         self.register_buffer('neg_eye', 1.0 - torch.eye(self.in_features, **factory_kwargs))
 
@@ -186,15 +181,17 @@ class DecorFC(Decorrelation):
 #         return self._conv_forward(input, self.weight, self.bias)
 
 
-class DecorConv2d(nn.Conv2d, Decorrelation):
+class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
 
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1, bias: bool = False,
-                 device=None, dtype=None) -> None:
+                 whiten=False, downsample_perc=1.0, device=None, dtype=None) -> None:
 
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.patch_length = in_channels * np.prod(kernel_size)
+        self.whiten = whiten
+        self.downsample_perc = downsample_perc
 
         super().__init__(
             in_channels=in_channels,
@@ -219,6 +216,7 @@ class DecorConv2d(nn.Conv2d, Decorrelation):
         self.weight.requires_grad_(False)
 
         self.input = None
+        self.output = torch.zeros(2,2) # DEBUG
 
         self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
         self.register_buffer('neg_eye', 1.0 - torch.eye(self.patch_length, **factory_kwargs))
@@ -238,8 +236,7 @@ class DecorConv2d(nn.Conv2d, Decorrelation):
         # combines the patch-wise R update with the convolutional W update
         # the idea is that for forward mapping we can just combine the R and W (also for linear)
         # think about consequences of z = Rx and y = Wz vs y = (WR)x = Ax... 
-        weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1), self.forward_conv.weight.flip(-1, -2),
-                                                 padding=0).moveaxis(0, 1)
+        weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1), self.forward_conv.weight.flip(-1, -2), padding=0).moveaxis(0, 1)
         
         # applies the combined weight to generate the desired output
         self.forward_conv.output = torch.nn.functional.conv2d(x, weight,
@@ -257,21 +254,20 @@ class DecorConv2d(nn.Conv2d, Decorrelation):
         
     @staticmethod
     def covariance(x):
-        return torch.zeros((1,1)) # DEBUG
+        return torch.cov(x.T)
         # return torch.cov(x.moveaxis(1,2).reshape(-1,x.shape[1]).T)
 
-    def update(self, whiten=False, downsample_perc=.05):
-
-        sample_size = int(len(self.input)*downsample_perc)
+    def update(self):
 
         # here we compute the patch outputs explicitly
-        # at this level we can downsample so this might be cheaper than explicitly computing in the above
+        # at this level we can downsample so this might be cheaper than explicitly computing in the above (since we otherwise average over patches x batches!!!)
+        sample_size = int(len(self.input) * self.downsample_perc)
         x = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
         x = x.moveaxis(1, 3)
-
         x = x.reshape(-1, self.patch_length)
+        self.output = x
 
-        if whiten:
+        if self.whiten:
             corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) - self.eye
         else:
             corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) * self.neg_eye
@@ -280,9 +276,9 @@ class DecorConv2d(nn.Conv2d, Decorrelation):
         weight = weight.reshape(-1, np.prod(weight.shape[1:]))
         decor_update = torch.einsum('ij,jk->ik', corr, weight)
 
-        decor_update = decor_update.reshape(self.weight.shape)
+        self.weight.grad = decor_update.reshape(self.weight.shape)
 
-        self.weight.grad = decor_update.clone()
+        # self.weight.grad = decor_update.clone()
 
        
 

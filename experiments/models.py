@@ -1,13 +1,13 @@
 import torch.nn as nn
-from decorrelation.decorrelation import DecorFC, DecorConv2d #DecorrelationPatch2d
+from decorrelation.decorrelation import Decorrelation, DecorConv2d #DecorrelationPatch2d
 
 class MLP(nn.Sequential):
 
     def __init__(self, input_dim):
-        super().__init__(DecorFC(input_dim),
+        super().__init__(Decorrelation(input_dim),
                         nn.Linear(input_dim, 100),
                         nn.ReLU(),
-                        DecorFC(100),
+                        Decorrelation(100),
                         nn.Linear(100, 10)
                         )
 
