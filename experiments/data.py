@@ -8,6 +8,7 @@ def get_MNIST(args):
 
     transform=transforms.Compose([
             transforms.ToTensor(),
+            transforms.Grayscale(1),
             transforms.Normalize((0.5), (0.5))
             ])
 
@@ -16,7 +17,7 @@ def get_MNIST(args):
     else:
         
         train_data = MNIST(root=args.data_path, train=True, download=True, transform=transform)
-        train_data.data = torch.unsqueeze(train_data.data, 1)
+        # train_data.data = torch.unsqueeze(train_data.data, 1)
     
         if args.train_samples != -1:
             train_data = Subset(train_data, np.random.permutation(len(train_data.data))[:args.train_samples])
@@ -26,7 +27,7 @@ def get_MNIST(args):
         test_loader = None
     else:
         test_data = MNIST(root=args.data_path, train=True, download=True, transform=transform)
-        test_data.data = torch.unsqueeze(test_data.data, 1)
+        # test_data.data = torch.unsqueeze(test_data.data, 1)
 
         if args.test_samples != -1:
             test_data = Subset(test_data, np.random.permutation(len(test_data.data))[:args.test_samples])

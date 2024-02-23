@@ -1,13 +1,13 @@
 import torch.nn as nn
-from decorrelation.decorrelation import DecorrelationFC, DecorrelationPatch2d
+from decorrelation.decorrelation import DecorFC, DecorConv2d #DecorrelationPatch2d
 
 class MLP(nn.Sequential):
 
     def __init__(self, input_dim):
-        super().__init__(DecorrelationFC(input_dim),
+        super().__init__(DecorFC(input_dim),
                         nn.Linear(input_dim, 100),
                         nn.ReLU(),
-                        DecorrelationFC(100),
+                        DecorFC(100),
                         nn.Linear(100, 10)
                         )
 
@@ -17,11 +17,19 @@ class MLP(nn.Sequential):
 class Convnet(nn.Sequential):
 
     def __init__(self, input_dim):
-        super().__init__(DecorrelationPatch2d(input_dim, kernel_size=(5,5)),
-                        nn.Conv2d(in_channels=input_dim[0], out_channels=20, kernel_size=(5,5)),
+        in_channels = input_dim[0]
+        # super().__init__(DecorrelationPatch2d(in_channels, kernel_size=(5,5)),
+        #                 nn.Conv2d(in_channels, out_channels=10, kernel_size=(5,5)),
+        #                 nn.ReLU(),
+        #                 nn.Flatten(),
+        #                 DecorrelationFC(5760), # expensive!
+        #                 nn.Linear(5760, 10)
+        #                 )
+
+        super().__init__(DecorConv2d(in_channels, out_channels=10, kernel_size=(5,5)),
                         nn.ReLU(),
-                        DecorrelationFC(100),
-                        nn.Linear(100, 10)
+                        nn.Flatten(),
+                        nn.Linear(5760, 10)
                         )
 
     def forward(self, x):

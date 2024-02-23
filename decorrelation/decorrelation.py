@@ -5,21 +5,26 @@ from torch import Tensor
 import numpy as np
 from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 from torch.nn.modules.utils import _pair
+import itertools
+from typing import Optional
 
-def decorrelation_modules(model: torch.nn.Module):
-    """Returns all decorrelation modules
+def decorrelation_modules(model: nn.Module):
+    """Returns the list of decorrelation modules
     """
+    return list(filter(lambda m: isinstance(m, Decorrelation), model.modules()))
 
-    def get_modules(model: torch.nn.Module):
-        children = list(model.children())
-        return [model] if len(children) == 0 else [ci for c in children for ci in get_modules(c)]
+    # def get_modules(model: torch.nn.Module):
+    #     children = list(model.children())
+    #     return [model] if len(children) == 0 else [ci for c in children for ci in get_modules(c)]
 
-    return list(filter(lambda m: isinstance(m, Decorrelation), get_modules(model)))
+    # return list(filter(lambda m: isinstance(m, Decorrelation), get_modules(model)))
 
-def decorrelation_parameters(model: torch.nn.Module):
-    """Returns all decorrelation parameters
+def decorrelation_parameters(model: nn.Module):
+    """Returns all decorrelation parameters as an iterable
     """
-    return list(map(lambda m: m.R, decorrelation_modules(model)))
+    # return list(map(lambda m: m.R, decorrelation_modules(model)))
+    # return decorrelation_modules(model)
+    return itertools.chain(*map( lambda m: m.parameters(), decorrelation_modules(model)))
 
 def decorrelation_update(modules):
     """Updates all decorrelation modules
@@ -56,7 +61,7 @@ class Decorrelation(nn.Module):
         raise NotImplementedError
 
 
-class DecorrelationFC(Decorrelation):
+class DecorFC(Decorrelation):
     r"""A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
     """
 
@@ -74,7 +79,8 @@ class DecorrelationFC(Decorrelation):
 
         self.in_features = in_features
         self.whiten = whiten
-        self.register_buffer('R', torch.eye(self.in_features, **factory_kwargs))
+        self.R = nn.Parameter(torch.eye(self.in_features, **factory_kwargs), requires_grad=False)
+        # self.register_buffer('R', torch.eye(self.in_features, **factory_kwargs))
         self.register_buffer('eye', torch.eye(self.in_features, **factory_kwargs))
         self.register_buffer('neg_eye', 1.0 - torch.eye(self.in_features, **factory_kwargs))
 
@@ -138,6 +144,152 @@ class DecorrelationFC(Decorrelation):
 
 # #### 2D CONV
 
+
+### Updated Pycopi implementation
+        
+# class DecorConv2d(_ConvNd, Decorrelation):
+
+
+#     def __init__(
+#         self,
+#         in_channels: int,
+#         out_channels: int,
+#         kernel_size: _size_2_t,
+#         stride: _size_2_t = 1,
+#         padding: str | _size_2_t = 0,
+#         dilation: _size_2_t = 1,
+#         bias: bool = True, # default false
+#         device=None,
+#         dtype=None
+#     ) -> None:
+#         factory_kwargs = {'device': device, 'dtype': dtype}
+#         kernel_size_ = _pair(kernel_size)
+#         stride_ = _pair(stride)
+#         padding_ = padding if isinstance(padding, str) else _pair(padding)
+#         dilation_ = _pair(dilation)
+
+#         self.patch_length = in_channels * np.prod(kernel_size)
+        
+#         super().__init__(
+#             in_channels, self.patch_length, kernel_size_, stride_, padding_, dilation_,
+#             False, _pair(0), groups=1, bias=False, padding_mode='zeros', **factory_kwargs)
+
+#     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+#         if self.padding_mode != 'zeros':
+#             return F.conv2d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
+#                             weight, bias, self.stride,
+#                             _pair(0), self.dilation, self.groups)
+#         return F.conv2d(input, weight, bias, self.stride,
+#                         self.padding, self.dilation, self.groups)
+
+#     def _forward(self, input: Tensor) -> Tensor:
+#         return self._conv_forward(input, self.weight, self.bias)
+
+
+class DecorConv2d(nn.Conv2d, Decorrelation):
+
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
+                 stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1, bias: bool = False,
+                 device=None, dtype=None) -> None:
+
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        self.patch_length = in_channels * np.prod(kernel_size)
+
+        super().__init__(
+            in_channels=in_channels,
+            out_channels=self.patch_length,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=False,
+            **factory_kwargs
+        )
+
+        self.forward_conv = nn.Conv2d(in_channels=self.patch_length,
+                                        out_channels=out_channels,
+                                        kernel_size=(1, 1),
+                                        stride=(1, 1),
+                                        padding=0,
+                                        dilation=(1, 1),
+                                        bias=bias is not None,
+                                        **factory_kwargs)
+
+        self.weight.requires_grad_(False)
+
+        self.input = None
+
+        self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
+        self.register_buffer('neg_eye', 1.0 - torch.eye(self.patch_length, **factory_kwargs))
+        # self.neg_eye = torch.nn.parameter.Parameter(1.0 - torch.eye(self.patch_length), requires_grad=False)
+        # self.eye = torch.nn.parameter.Parameter(torch.eye(self.patch_length), requires_grad=False)
+        # self.decor_losses = []
+
+    def reset_parameters(self) -> None:
+        w_square = self.weight.reshape(self.patch_length, self.patch_length)
+        w_square = torch.nn.init.eye_(w_square)
+        self.weight = torch.nn.Parameter(w_square.reshape(self.patch_length, self.in_channels, * self.kernel_size))
+
+    def forward(self, x: Tensor) -> Tensor:
+
+        self.input = x
+
+        # combines the patch-wise R update with the convolutional W update
+        # the idea is that for forward mapping we can just combine the R and W (also for linear)
+        # think about consequences of z = Rx and y = Wz vs y = (WR)x = Ax... 
+        weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1), self.forward_conv.weight.flip(-1, -2),
+                                                 padding=0).moveaxis(0, 1)
+        
+        # applies the combined weight to generate the desired output
+        self.forward_conv.output = torch.nn.functional.conv2d(x, weight,
+                                         stride=self.stride,
+                                         dilation=self.dilation,
+                                         padding=self.padding)
+
+        # can't we do this at a higher level?       
+        self.forward_conv.output.requires_grad_(True)
+        self.forward_conv.output.retain_grad()
+
+        self.output = 0.0 # DEBUG
+        
+        return self.forward_conv.output
+    
+        # NOTE: one approach could be to have a decorrelator that transforms into a patchwise representation and a convlayer that takes the patchwise version and maps to the output...
+        
+    @staticmethod
+    def covariance(x):
+        return torch.zeros((1,1)) # DEBUG
+        # return torch.cov(x.moveaxis(1,2).reshape(-1,x.shape[1]).T)
+
+    def update(self, whiten=False, downsample_perc=.05):
+
+        sample_size = int(len(self.input)*downsample_perc)
+
+        # here we compute the patch outputs explicitly
+        # at this level we can downsample so this might be cheaper than explicitly computing in the above
+        x = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
+        x = x.moveaxis(1, 3)
+
+        x = x.reshape(-1, self.patch_length)
+
+        if whiten:
+            corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) - self.eye
+        else:
+            corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) * self.neg_eye
+
+        weight = self.weight
+        weight = weight.reshape(-1, np.prod(weight.shape[1:]))
+        decor_update = torch.einsum('ij,jk->ik', corr, weight)
+
+        decor_update = decor_update.reshape(self.weight.shape)
+
+        self.weight.grad = decor_update.clone()
+
+       
+
+        
+
 # """
 # Options:
 #     - patchwise decorrelation as we do now
@@ -146,66 +298,67 @@ class DecorrelationFC(Decorrelation):
 #     - expand the whole input and globally decorrelate and reshape back (extreme case of the naive approach); possibly combined with factorization...; advantage is separate decorrelating conv module
 # """
 
-# ## We first implement the patchwise approach of Sander
 
-class DecorrelationPatch2d(torch.nn.Module):
+# BELOW AN INTERESTING YET NONFUNCTIONAL IMPLEMENTATION
+        
+# class DecorrelationPatch2d(torch.nn.Module):
 
-    def __init__(self,
-                in_channels: int,
-                kernel_size: _size_2_t,
-                whiten: bool = False,
-                device=None,
-                dtype=None) -> None:
+#     def __init__(self,
+#                 in_channels: int,
+#                 kernel_size: _size_2_t,
+#                 whiten: bool = False,
+#                 device=None,
+#                 dtype=None) -> None:
 
-        factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__()
+#         factory_kwargs = {'device': device, 'dtype': dtype}
+#         super().__init__()
 
-        self.in_channels = in_channels
-        self.kernel_size = kernel_size
-        self.whiten = whiten
+#         self.in_channels = in_channels
+#         self.kernel_size = kernel_size
+#         self.whiten = whiten
 
-        self.patch_length = in_channels * np.prod(kernel_size) # number of elements in a patch to be represented as channels
-        self.unfold = torch.nn.Unfold(kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
+#         self.patch_length = in_channels * np.prod(kernel_size) # number of elements in a patch to be represented as channels
+#         self.unfold = torch.nn.Unfold(kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
 
-        self.fold = None
-        self.divisor = None
+#         self.fold = None
+#         self.divisor = None
 
-        self.register_buffer('R', torch.eye(self.patch_length, **factory_kwargs))
-        self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
-        self.register_buffer('neg_eye', 1.0 - torch.eye(self.patch_length, **factory_kwargs))
+#         self.register_buffer('R', torch.eye(self.patch_length, **factory_kwargs))
+#         self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
+#         self.register_buffer('neg_eye', 1.0 - torch.eye(self.patch_length, **factory_kwargs))
 
-    def forward(self, input: Tensor) -> Tensor:
+#     def forward(self, input: Tensor) -> Tensor:
 
-        # transform from tensor to patch representation
-        z = self.unfold(input) # [N, C*H*W, P]
+#         # transform from tensor to patch representation
+#         z = self.unfold(input) # [N, C*H*W, P]
 
-        # apply decorrelating transform
-        self.output = torch.einsum('nij,ik->nij', z, self.R) # decorrelated patches [N, C*H*W, P]
+#         # apply decorrelating transform
+#         self.output = torch.einsum('nij,ik->nij', z, self.R) # decorrelated patches [N, C*H*W, P]
 
-        # transform from patch to tensor representation
-        if self.fold is None: # we only compute this once
-            self.fold = torch.nn.Fold(output_size=input.shape[-2:], kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
-            self.divisor = self.fold(self.unfold(torch.ones_like(input)))
+#         # transform from patch to tensor representation
+#         if self.fold is None: # we only compute this once
+#             self.fold = torch.nn.Fold(output_size=input.shape[-2:], kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
+#             self.divisor = self.fold(self.unfold(torch.ones_like(input)))
 
-        # we could create a path mask and apply this. But there is likely a more direct route
-        # z = self.output
-        # self.fold(z)
+#         # we could create a path mask and apply this. But there is likely a more direct route
+#         # z = self.output
+#         # self.fold(z)
          
-        # BUT THIS SHOULD ALSO JUST WORK.. WHY NOT?
-        return self.fold(self.output) / self.divisor # [N, C, H, W]
+#         # BUT THIS SHOULD ALSO JUST WORK.. WHY NOT?
+#         return self.fold(self.output) / self.divisor # [N, C, H, W]
 
-    @staticmethod
-    def covariance(x):
-        return torch.cov(x.moveaxis(1,2).reshape(-1,x.shape[1]).T)
-        # return torch.einsum('nip,njp->ij', x, x) / (x.shape[0] * x.shape[2])
+#     @staticmethod
+#     def covariance(x):
+#         return torch.cov(x.moveaxis(1,2).reshape(-1,x.shape[1]).T)
+#         # return torch.einsum('nip,njp->ij', x, x) / (x.shape[0] * x.shape[2])
     
-    def update(self):
-        C = torch.einsum('nip,njp->ij', self.output, self.output) / (self.output.shape[0] * self.output.shape[2]) # double check if this is correct
-        if self.whiten:
-            C -= self.eye
-        else:
-            C *= self.neg_eye
-        self.R.grad = torch.einsum('ij,jk->ik', C, self.R)
+#     def update(self):
+#         C = torch.einsum('nip,njp->ij', self.output, self.output) / (self.output.shape[0] * self.output.shape[2]) # double check if this is correct
+#         if self.whiten:
+#             C -= self.eye
+#         else:
+#             C *= self.neg_eye
+#         self.R.grad = torch.einsum('ij,jk->ik', C, self.R)
 
     # def flatten(self, x):
     #     z = self.fold(x) / self.divisor
