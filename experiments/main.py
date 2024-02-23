@@ -41,6 +41,6 @@ if __name__ == '__main__':
 
         model, lossfun, train_loader, test_loader = get_experiment(args, device)
 
-        model, L, C = train_loop(args, model, lossfun, train_loader, device)
+        model, L, C, V = train_loop(args, model, lossfun, train_loader, device)
 
     

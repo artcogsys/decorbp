@@ -27,6 +27,11 @@ def decorrelation_update(modules):
     for m in modules:
         m.update()     
 
+def lower_triangular(C):
+    """Return lower triangular elements of a matrix as a vector
+    """
+    return C[torch.tril_indices(C.shape[0], C.shape[1], offset=-1).unbind()]
+
 def covariance(modules):
     """ This is the measure of interest. We return the mean off-diagonal absolute covariance and the mean variance
     """
@@ -34,7 +39,7 @@ def covariance(modules):
     var = 0.0
     for m in modules:
         C = m.covariance(m.output)
-        cov += torch.mean(torch.abs(C[torch.tril_indices(len(C), len(C), offset=1)]))
+        cov += torch.mean(torch.abs(lower_triangular(C)))
         var += torch.mean(torch.diag(C))
     cov /= len(modules)
     var /= len(modules)

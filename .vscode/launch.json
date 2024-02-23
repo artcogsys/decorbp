@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": ["@config/MNIST.txt"]
+            "args": ["@experiments/config/MNIST.txt"]
         }
     ]
 }

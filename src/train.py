@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update, covariance
+from src.decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update, covariance
 
 def train_loop(args, model, lossfun, train_loader, device):
 
