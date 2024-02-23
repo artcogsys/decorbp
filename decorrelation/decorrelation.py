@@ -247,11 +247,9 @@ class DecorConv2d(nn.Conv2d, Decorrelation):
                                          dilation=self.dilation,
                                          padding=self.padding)
 
-        # can't we do this at a higher level?       
+        # can't we do this at a higher level?  probably not since this is created on the fly and needs to be backpropagated through
         self.forward_conv.output.requires_grad_(True)
         self.forward_conv.output.retain_grad()
-
-        self.output = 0.0 # DEBUG
         
         return self.forward_conv.output
     
