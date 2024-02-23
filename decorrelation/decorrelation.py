@@ -268,28 +268,21 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
         # at this level we can downsample so this might be cheaper than explicitly computing in the above (since we otherwise average over patches x batches!!!)
         sample_size = int(len(self.input) * self.downsample_perc)
         x = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
-        x = x.moveaxis(1, 3)
-        x = x.reshape(-1, self.patch_length)
-        self.output = x
+
+        C = torch.einsum('nipq,njpq->ij', x, x) / (x.shape[0] * x.shape[2] * x.shape[3])
 
         if self.whiten:
-            C = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) - self.eye
+            C -= self.eye
         else:
-            C = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) * self.neg_eye
+            C *= self.neg_eye
 
-        weight = self.weight
-        weight = weight.reshape(-1, np.prod(weight.shape[1:]))
-        decor_update = torch.einsum('ij,jk->ik', C, weight)
-
-        self.weight.grad = decor_update.reshape(self.weight.shape)
+        self.weight.grad = torch.einsum('ij,jabc->iabc', C, self.weight)
 
         # decorrelation loss
         if self.whiten:
             return torch.mean(torch.square(lower_triangular(C, offset=0)))
         else:
             return torch.mean(torch.square(lower_triangular(C, offset=-1)))
-
-        # self.weight.grad = decor_update.clone()
 
 
         
