@@ -5,7 +5,6 @@ import numpy as np
 import argparse
 from experiments import get_experiment
 from decorrelation.train import train_loop
-# from decorrelation.decorrelation import set_decor_learning_rate
 import time
 
 def parse_arguments():
@@ -39,15 +38,10 @@ if __name__ == '__main__':
 
         if i == 0:
             print('Decorrelated BP:')
-            # set_decor_learning_rate(model, args.lr_decor)
         else:
             print('Regular BP:')
             args.lr_decor = 0.0
-            # set_decor_learning_rate(model, 0.0)
 
         tic = time.time()
         model, L = train_loop(args, model, lossfun, train_loader, device)
         print(f'time elapsed: {time.time() - tic:.3f} s')
-
-    
-# added channel breaks pil code

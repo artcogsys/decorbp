@@ -8,10 +8,6 @@ from torch.nn.modules.utils import _pair
 import itertools
 from typing import Optional
 
-# def set_decor_learning_rate(model, lr): # THIS COULD BE DONE IN NP
-#     for m in filter(lambda m: isinstance(m, AbstractDecorrelation), model.modules()):
-#         m.lr = lr
-
 def decorrelation_modules(model: nn.Module):
     """Returns the list of decorrelation modules
     """
@@ -34,19 +30,6 @@ def lower_triangular(C, offset):
     """Return lower triangular elements of a matrix as a vector
     """
     return C[torch.tril_indices(C.shape[0], C.shape[1], offset=offset).unbind()]
-
-# def covariance(modules):
-#     """ This is the measure of interest. We return the mean off-diagonal absolute covariance and the mean variance
-#     """
-#     cov = 0.0
-#     var = 0.0
-#     for m in modules:
-#         C = m.covariance(m.output)
-#         cov += torch.mean(torch.abs(lower_triangular(C)))
-#         var += torch.mean(torch.diag(C))
-#     cov /= len(modules)
-#     var /= len(modules)
-#     return cov, var
 
 class AbstractDecorrelation(nn.Module):
     """Abstract base class for decorrelation so we can identify decorrelation modules.
@@ -91,7 +74,6 @@ class Decorrelation(AbstractDecorrelation):
         return self.z.view(input.shape)
 
     def update(self): 
-         # cant be done in forward pass due to BP (different for NP...)
         
         C = self.z.T @ self.z / len(self.z)
         if self.whiten:
@@ -100,91 +82,6 @@ class Decorrelation(AbstractDecorrelation):
         else:
             self.R.grad = (C * self.neg_eye) @ self.R
             return torch.mean(torch.square(lower_triangular(C, offset=-1)))
-
-## BE ABLE TO COMPUTE CORR LOSS FOR BP AS WELL? SEPARATE FROM ABOVE???
-
-
-## DO WE WANT TO ADD THE SGD UPDATING TO THE FORWARD STEP? 
-
-## CAN WE SEPARATE OUT PATCH COMPUTATION AND THEN RECOMBINATION TO CONVOLUTIONAL OUTPUT? THIS MEANS MAPPING CONV INPUT TO SAME SIZE WHERE CHANNELS = INCHAN x H x W PATCHES AND W IS 1 x 1 CONVOLUTION
-
-    # def update(self):
-        # """ Better at decorrelating/whitening but poor at loss minimization
-        # """
-
-    #     # compute E[X'X]
-    #     Exx = self.output.T @ self.output / len(self.output)
-
-    #     # E[X]'
-    #     Ex = torch.mean(self.output, axis=0, keepdim=True)
-
-    #     # compute autocovariance matrix
-    #     K = Exx - Ex.T @ Ex
-        
-    #     if self.whiten:
-    #         K -= self.eye
-    #     else:
-    #         K *= self.neg_eye
-        
-    #     self.R.grad = K @ self.R
-
-
-    # def update(self):
-    #     """
-    #     Proper decorrelation requires minimizing E[X'X] - E[X']E[X]... Flipped dims... wrt standard notation
-    #     """
-    #     # E[X'X]
-    #     Exx = self.output.T @ self.output / len(self.output)
-        
-    #     # E[X]'
-    #     Ex = torch.mean(self.output, axis=0, keepdim=True)
-
-    #     C = Exx - Ex.T @ Ex
-    #     self.R.grad = torch.einsum('ij,jk->ik', C, self.R).clone() # NOTE: why was clone added in constence code?
-    
-
-# #### 2D CONV
-
-
-### Updated Pycopi implementation
-        
-# class DecorConv2d(_ConvNd, Decorrelation):
-
-
-#     def __init__(
-#         self,
-#         in_channels: int,
-#         out_channels: int,
-#         kernel_size: _size_2_t,
-#         stride: _size_2_t = 1,
-#         padding: str | _size_2_t = 0,
-#         dilation: _size_2_t = 1,
-#         bias: bool = True, # default false
-#         device=None,
-#         dtype=None
-#     ) -> None:
-#         factory_kwargs = {'device': device, 'dtype': dtype}
-#         kernel_size_ = _pair(kernel_size)
-#         stride_ = _pair(stride)
-#         padding_ = padding if isinstance(padding, str) else _pair(padding)
-#         dilation_ = _pair(dilation)
-
-#         self.patch_length = in_channels * np.prod(kernel_size)
-        
-#         super().__init__(
-#             in_channels, self.patch_length, kernel_size_, stride_, padding_, dilation_,
-#             False, _pair(0), groups=1, bias=False, padding_mode='zeros', **factory_kwargs)
-
-#     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
-#         if self.padding_mode != 'zeros':
-#             return F.conv2d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
-#                             weight, bias, self.stride,
-#                             _pair(0), self.dilation, self.groups)
-#         return F.conv2d(input, weight, bias, self.stride,
-#                         self.padding, self.dilation, self.groups)
-
-#     def _forward(self, input: Tensor) -> Tensor:
-#         return self._conv_forward(input, self.weight, self.bias)
 
 
 class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
@@ -221,13 +118,9 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
         self.weight.requires_grad_(False)
 
         self.input = None
-        self.output = torch.zeros(2,2) # DEBUG
 
         self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
         self.register_buffer('neg_eye', 1.0 - torch.eye(self.patch_length, **factory_kwargs))
-        # self.neg_eye = torch.nn.parameter.Parameter(1.0 - torch.eye(self.patch_length), requires_grad=False)
-        # self.eye = torch.nn.parameter.Parameter(torch.eye(self.patch_length), requires_grad=False)
-        # self.decor_losses = []
 
     def reset_parameters(self) -> None:
         w_square = self.weight.reshape(self.patch_length, self.patch_length)
@@ -249,7 +142,7 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
                                          dilation=self.dilation,
                                          padding=self.padding)
 
-        # can't we do this at a higher level?  probably not since this is created on the fly and needs to be backpropagated through
+        # needed for BP gradient propagation
         self.forward_conv.output.requires_grad_(True)
         self.forward_conv.output.retain_grad()
         
@@ -257,11 +150,6 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
     
         # NOTE: one approach could be to have a decorrelator that transforms into a patchwise representation and a convlayer that takes the patchwise version and maps to the output...
         
-    # @staticmethod
-    # def covariance(x):
-    #     return torch.cov(x.T)
-    #     # return torch.cov(x.moveaxis(1,2).reshape(-1,x.shape[1]).T)
-
     def update(self):
 
         # here we compute the patch outputs explicitly
@@ -675,3 +563,89 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
 #             return [self.weight]
         
 
+
+
+
+## BE ABLE TO COMPUTE CORR LOSS FOR BP AS WELL? SEPARATE FROM ABOVE???
+
+## DO WE WANT TO ADD THE SGD UPDATING TO THE FORWARD STEP? 
+
+## CAN WE SEPARATE OUT PATCH COMPUTATION AND THEN RECOMBINATION TO CONVOLUTIONAL OUTPUT? THIS MEANS MAPPING CONV INPUT TO SAME SIZE WHERE CHANNELS = INCHAN x H x W PATCHES AND W IS 1 x 1 CONVOLUTION
+
+    # def update(self):
+        # """ Better at decorrelating/whitening but poor at loss minimization
+        # """
+
+    #     # compute E[X'X]
+    #     Exx = self.output.T @ self.output / len(self.output)
+
+    #     # E[X]'
+    #     Ex = torch.mean(self.output, axis=0, keepdim=True)
+
+    #     # compute autocovariance matrix
+    #     K = Exx - Ex.T @ Ex
+        
+    #     if self.whiten:
+    #         K -= self.eye
+    #     else:
+    #         K *= self.neg_eye
+        
+    #     self.R.grad = K @ self.R
+
+
+    # def update(self):
+    #     """
+    #     Proper decorrelation requires minimizing E[X'X] - E[X']E[X]... Flipped dims... wrt standard notation
+    #     """
+    #     # E[X'X]
+    #     Exx = self.output.T @ self.output / len(self.output)
+        
+    #     # E[X]'
+    #     Ex = torch.mean(self.output, axis=0, keepdim=True)
+
+    #     C = Exx - Ex.T @ Ex
+    #     self.R.grad = torch.einsum('ij,jk->ik', C, self.R).clone() # NOTE: why was clone added in constence code?
+    
+
+# #### 2D CONV
+
+
+### Updated Pycopi implementation
+        
+# class DecorConv2d(_ConvNd, Decorrelation):
+
+
+#     def __init__(
+#         self,
+#         in_channels: int,
+#         out_channels: int,
+#         kernel_size: _size_2_t,
+#         stride: _size_2_t = 1,
+#         padding: str | _size_2_t = 0,
+#         dilation: _size_2_t = 1,
+#         bias: bool = True, # default false
+#         device=None,
+#         dtype=None
+#     ) -> None:
+#         factory_kwargs = {'device': device, 'dtype': dtype}
+#         kernel_size_ = _pair(kernel_size)
+#         stride_ = _pair(stride)
+#         padding_ = padding if isinstance(padding, str) else _pair(padding)
+#         dilation_ = _pair(dilation)
+
+#         self.patch_length = in_channels * np.prod(kernel_size)
+        
+#         super().__init__(
+#             in_channels, self.patch_length, kernel_size_, stride_, padding_, dilation_,
+#             False, _pair(0), groups=1, bias=False, padding_mode='zeros', **factory_kwargs)
+
+#     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+#         if self.padding_mode != 'zeros':
+#             return F.conv2d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
+#                             weight, bias, self.stride,
+#                             _pair(0), self.dilation, self.groups)
+#         return F.conv2d(input, weight, bias, self.stride,
+#                         self.padding, self.dilation, self.groups)
+
+#     def _forward(self, input: Tensor) -> Tensor:
+#         return self._conv_forward(input, self.weight, self.bias)
