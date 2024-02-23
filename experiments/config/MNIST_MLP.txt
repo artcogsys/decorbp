@@ -1,0 +1,8 @@
+--lr=1e-3
+--epochs=20
+--batch_size=64
+--num_workers=0
+--experiment=MNIST_MLP
+--data_path=~/Data
+--train_samples=1000
+--test_samples=1000

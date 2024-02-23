@@ -5,12 +5,21 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "MNIST",
+            "name": "MNIST_MLP",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": ["@experiments/config/MNIST.txt"]
+            "args": ["@experiments/config/MNIST_MLP.txt"]
+        },
+        {
+            "name": "MNIST_CONVNET",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": ["@experiments/config/MNIST_CONVNET.txt"]
         }
+
     ]
 }

@@ -2,7 +2,7 @@
 --epochs=20
 --batch_size=64
 --num_workers=0
---experiment=MNIST
+--experiment=MNIST_CONVNET
 --data_path=~/Data
 --train_samples=1000
 --test_samples=1000
