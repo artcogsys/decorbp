@@ -90,13 +90,37 @@ class DecorrelationFC(Decorrelation):
         return torch.cov(x.T)
     
     def update(self):
-        C = torch.einsum('ni,nj->ij', self.output, self.output) / len(self.output)
+
+        # compute E[X'X]
+        Exx = self.output.T @ self.output / len(self.output)
+        
         if self.whiten:
-            C -= self.eye
+            Exx -= self.eye
         else:
-            C *= self.neg_eye
-        self.R.grad = torch.einsum('ij,jk->ik', C, self.R).clone() # NOTE: why was clone added in constence code?
-        # self.R.grad = (self.R.grad + self.R.grad.T) / 2.0 # enforce symmetry
+            Exx *= self.neg_eye
+        
+        self.R.grad = Exx @ self.R
+
+    # def update(self):
+        # """ Better at decorrelating/whitening but poor at loss minimization
+        # """
+
+    #     # compute E[X'X]
+    #     Exx = self.output.T @ self.output / len(self.output)
+
+    #     # E[X]'
+    #     Ex = torch.mean(self.output, axis=0, keepdim=True)
+
+    #     # compute autocovariance matrix
+    #     K = Exx - Ex.T @ Ex
+        
+    #     if self.whiten:
+    #         K -= self.eye
+    #     else:
+    #         K *= self.neg_eye
+        
+    #     self.R.grad = K @ self.R
+
 
     # def update(self):
     #     """
