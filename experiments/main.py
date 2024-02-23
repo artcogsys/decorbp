@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import argparse
 from experiments import get_experiment
-from src.train import train_loop
+from decorrelation.train import train_loop
 
 def parse_arguments():
 
