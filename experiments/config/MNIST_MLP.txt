@@ -1,4 +1,4 @@
---lr=1e-3
+--lr=1e-2
 --epochs=20
 --batch_size=64
 --num_workers=0

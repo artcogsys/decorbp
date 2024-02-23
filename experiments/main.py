@@ -5,6 +5,7 @@ import numpy as np
 import argparse
 from experiments import get_experiment
 from decorrelation.train import train_loop
+# from decorrelation.decorrelation import set_decor_learning_rate
 import time
 
 def parse_arguments():
@@ -30,20 +31,22 @@ if __name__ == '__main__':
     
     for i in range(2):
 
-        if i == 0:
-            print('Decorrelated BP:')
-        else:
-            print('Regular BP:')
-            args.lr_decor = 0.0
-
         torch.manual_seed(args.seed)
         torch.cuda.manual_seed(args.seed)
         np.random.seed(args.seed)
 
         model, lossfun, train_loader, test_loader = get_experiment(args, device)
 
+        if i == 0:
+            print('Decorrelated BP:')
+            # set_decor_learning_rate(model, args.lr_decor)
+        else:
+            print('Regular BP:')
+            args.lr_decor = 0.0
+            # set_decor_learning_rate(model, 0.0)
+
         tic = time.time()
-        model, L, C, V = train_loop(args, model, lossfun, train_loader, device)
+        model, L = train_loop(args, model, lossfun, train_loader, device)
         print(f'time elapsed: {time.time() - tic:.3f} s')
 
     

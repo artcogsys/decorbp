@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from decorrelation.decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update, covariance
+from decorrelation.decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update #, covariance
 
 def train_loop(args, model, lossfun, train_loader, device):
 
@@ -11,8 +11,8 @@ def train_loop(args, model, lossfun, train_loader, device):
 
         L = np.zeros(args.epochs+1) # loss
         D = np.zeros(args.epochs+1) # decorrelation loss
-        C = np.zeros(args.epochs+1) # off-diagonal mean abs covariance
-        V = np.zeros(args.epochs+1) # mean variance
+        # C = np.zeros(args.epochs+1) # off-diagonal mean abs covariance
+        # V = np.zeros(args.epochs+1) # mean variance
         for epoch in range(args.epochs+1):
 
             for step, batch in enumerate(train_loader):
@@ -36,15 +36,16 @@ def train_loop(args, model, lossfun, train_loader, device):
 
                 L[epoch] += loss.item()
                 
-                cov, var = covariance(decorrelators)
-                C[epoch] += cov
-                V[epoch] += var
+                # cov, var = covariance(decorrelators)
+                # C[epoch] += cov
+                # V[epoch] += var
             
             L[epoch] /= step
-            C[epoch] /= step
-            V[epoch] /= step
+            # C[epoch] /= step
+            # V[epoch] /= step
 
             # print(f'epoch {epoch:<3}\tloss: {L[epoch]:3f}\tcov: {C[epoch]:3f}\tvar: {V[epoch]:3f}')
             print(f'epoch {epoch:<3}\tloss: {L[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}')
+            # print(f'epoch {epoch:<3}\tloss: {L[epoch]:3f}')
 
-        return model, L, C, V
+        return model, L #, C, V

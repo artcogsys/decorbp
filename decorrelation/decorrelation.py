@@ -8,6 +8,10 @@ from torch.nn.modules.utils import _pair
 import itertools
 from typing import Optional
 
+# def set_decor_learning_rate(model, lr): # THIS COULD BE DONE IN NP
+#     for m in filter(lambda m: isinstance(m, AbstractDecorrelation), model.modules()):
+#         m.lr = lr
+
 def decorrelation_modules(model: nn.Module):
     """Returns the list of decorrelation modules
     """
@@ -19,30 +23,30 @@ def decorrelation_parameters(model: nn.Module):
     return itertools.chain(*map( lambda m: m.parameters(), decorrelation_modules(model)))
 
 def decorrelation_update(modules):
-    """Updates all decorrelation modules
+    """Updates all decorrelation modules and returns decorrelation loss
     """
     loss = 0.0
     for m in modules:
         loss += m.update()
     return loss
 
-def lower_triangular(C):
+def lower_triangular(C, offset):
     """Return lower triangular elements of a matrix as a vector
     """
-    return C[torch.tril_indices(C.shape[0], C.shape[1], offset=-1).unbind()]
+    return C[torch.tril_indices(C.shape[0], C.shape[1], offset=offset).unbind()]
 
-def covariance(modules):
-    """ This is the measure of interest. We return the mean off-diagonal absolute covariance and the mean variance
-    """
-    cov = 0.0
-    var = 0.0
-    for m in modules:
-        C = m.covariance(m.output)
-        cov += torch.mean(torch.abs(lower_triangular(C)))
-        var += torch.mean(torch.diag(C))
-    cov /= len(modules)
-    var /= len(modules)
-    return cov, var
+# def covariance(modules):
+#     """ This is the measure of interest. We return the mean off-diagonal absolute covariance and the mean variance
+#     """
+#     cov = 0.0
+#     var = 0.0
+#     for m in modules:
+#         C = m.covariance(m.output)
+#         cov += torch.mean(torch.abs(lower_triangular(C)))
+#         var += torch.mean(torch.diag(C))
+#     cov /= len(modules)
+#     var /= len(modules)
+#     return cov, var
 
 class AbstractDecorrelation(nn.Module):
     """Abstract base class for decorrelation so we can identify decorrelation modules.
@@ -51,9 +55,9 @@ class AbstractDecorrelation(nn.Module):
     def forward(self, input: Tensor) -> Tensor:
         raise NotImplementedError
     
-    def update(self):
+    def update(self): 
         raise NotImplementedError
-
+    
 
 class Decorrelation(AbstractDecorrelation):
     r"""A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
@@ -68,14 +72,13 @@ class Decorrelation(AbstractDecorrelation):
     def __init__(self, in_features: int, whiten=False, device=None, dtype=None) -> None:
         """"Params:
             - in_features: number of inputs
-            - whiten: strength of whitening constraint (MOVE TO 0.0 = no whitening)
         """
 
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
 
         self.in_features = in_features
-        self.whiten = whiten
+        self.whiten=whiten
         self.R = nn.Parameter(torch.eye(self.in_features, **factory_kwargs), requires_grad=False)
         self.register_buffer('eye', torch.eye(self.in_features, **factory_kwargs))
         self.register_buffer('neg_eye', 1.0 - torch.eye(self.in_features, **factory_kwargs))
@@ -84,27 +87,22 @@ class Decorrelation(AbstractDecorrelation):
         nn.init.eye(self.R)
 
     def forward(self, input: Tensor) -> Tensor:
-        self.output = F.linear(input.view(len(input), -1), self.R) # do we need to add grad info here? See conv
-        return self.output.view(input.shape)
+        self.z = F.linear(input.view(len(input), -1), self.R)
+        return self.z.view(input.shape)
 
-    @staticmethod
-    def covariance(x):
-        return torch.cov(x.T)
-    
-    def update(self):
-
-        # compute E[X'X]
-        C = self.output.T @ self.output / len(self.output)
+    def update(self): 
+         # cant be done in forward pass due to BP (different for NP...)
         
+        C = self.z.T @ self.z / len(self.z)
         if self.whiten:
-            C -= self.eye
+            self.R.grad = (C - self.eye) @ self.R
+            return torch.mean(torch.square(lower_triangular(C, offset=0)))
         else:
-            C *= self.neg_eye
-        
-        self.R.grad = C @ self.R
+            self.R.grad = (C * self.neg_eye) @ self.R
+            return torch.mean(torch.square(lower_triangular(C, offset=-1)))
 
-        # loss as lower means absolute value of lower triangular part of C 
-        return torch.mean(torch.abs(lower_triangular(C)))
+## BE ABLE TO COMPUTE CORR LOSS FOR BP AS WELL? SEPARATE FROM ABOVE???
+
 
 ## DO WE WANT TO ADD THE SGD UPDATING TO THE FORWARD STEP? 
 
@@ -191,15 +189,14 @@ class Decorrelation(AbstractDecorrelation):
 
 class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
 
-
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1, bias: bool = False,
-                 whiten=False, downsample_perc=1.0, device=None, dtype=None) -> None:
+                 downsample_perc=1.0, whiten=False, device=None, dtype=None) -> None:
 
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.patch_length = in_channels * np.prod(kernel_size)
-        self.whiten = whiten
         self.downsample_perc = downsample_perc
+        self.whiten=whiten
 
         super().__init__(
             in_channels=in_channels,
@@ -260,10 +257,10 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
     
         # NOTE: one approach could be to have a decorrelator that transforms into a patchwise representation and a convlayer that takes the patchwise version and maps to the output...
         
-    @staticmethod
-    def covariance(x):
-        return torch.cov(x.T)
-        # return torch.cov(x.moveaxis(1,2).reshape(-1,x.shape[1]).T)
+    # @staticmethod
+    # def covariance(x):
+    #     return torch.cov(x.T)
+    #     # return torch.cov(x.moveaxis(1,2).reshape(-1,x.shape[1]).T)
 
     def update(self):
 
@@ -276,19 +273,24 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
         self.output = x
 
         if self.whiten:
-            corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) - self.eye
+            C = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) - self.eye
         else:
-            corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) * self.neg_eye
+            C = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) * self.neg_eye
 
         weight = self.weight
         weight = weight.reshape(-1, np.prod(weight.shape[1:]))
-        decor_update = torch.einsum('ij,jk->ik', corr, weight)
+        decor_update = torch.einsum('ij,jk->ik', C, weight)
 
         self.weight.grad = decor_update.reshape(self.weight.shape)
 
+        # decorrelation loss
+        if self.whiten:
+            return torch.mean(torch.square(lower_triangular(C, offset=0)))
+        else:
+            return torch.mean(torch.square(lower_triangular(C, offset=-1)))
+
         # self.weight.grad = decor_update.clone()
 
-       
 
         
 
