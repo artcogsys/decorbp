@@ -6,7 +6,6 @@ import numpy as np
 from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 from torch.nn.modules.utils import _pair
 import itertools
-from typing import Optional
 
 def decorrelation_modules(model: nn.Module):
     """Returns the list of decorrelation modules
@@ -70,12 +69,11 @@ class Decorrelation(AbstractDecorrelation):
         nn.init.eye(self.R)
 
     def forward(self, input: Tensor) -> Tensor:
-        self.z = F.linear(input.view(len(input), -1), self.R)
-        return self.z.view(input.shape)
+        self.output = F.linear(input.view(len(input), -1), self.R)
+        return self.output.view(input.shape)
 
-    def update(self): 
-        
-        C = self.z.T @ self.z / len(self.z)
+    def update(self):       
+        C = self.output.T @ self.output / len(self.output)
         if self.whiten:
             self.R.grad = (C - self.eye) @ self.R
             return torch.mean(torch.square(lower_triangular(C, offset=0)))
@@ -132,9 +130,9 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
         self.input = x
 
         # combines the patch-wise R update with the convolutional W update
-        # the idea is that for forward mapping we can just combine the R and W (also for linear)
-        # think about consequences of z = Rx and y = Wz vs y = (WR)x = Ax... 
-        weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1), self.forward_conv.weight.flip(-1, -2), padding=0).moveaxis(0, 1)
+        weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1),
+                                            self.forward_conv.weight.flip(-1, -2),
+                                            padding=0).moveaxis(0, 1)
         
         # applies the combined weight to generate the desired output
         self.forward_conv.output = torch.nn.functional.conv2d(x, weight,
@@ -147,9 +145,8 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
         self.forward_conv.output.retain_grad()
         
         return self.forward_conv.output
-    
-        # NOTE: one approach could be to have a decorrelator that transforms into a patchwise representation and a convlayer that takes the patchwise version and maps to the output...
-        
+
+
     def update(self):
 
         # here we compute the patch outputs explicitly
@@ -158,7 +155,6 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
         x = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
 
         C = torch.einsum('nipq,njpq->ij', x, x) / (x.shape[0] * x.shape[2] * x.shape[3])
-
         if self.whiten:
             C -= self.eye
         else:
@@ -166,7 +162,7 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
 
         self.weight.grad = torch.einsum('ij,jabc->iabc', C, self.weight)
 
-        # decorrelation loss
+        # decorrelation loss computed per patch
         if self.whiten:
             return torch.mean(torch.square(lower_triangular(C, offset=0)))
         else:
