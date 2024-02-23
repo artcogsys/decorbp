@@ -98,6 +98,18 @@ class DecorrelationFC(Decorrelation):
         self.R.grad = torch.einsum('ij,jk->ik', C, self.R).clone() # NOTE: why was clone added in constence code?
         # self.R.grad = (self.R.grad + self.R.grad.T) / 2.0 # enforce symmetry
 
+    # def update(self):
+    #     """
+    #     Proper decorrelation requires minimizing E[X'X] - E[X']E[X]... Flipped dims... wrt standard notation
+    #     """
+    #     # E[X'X]
+    #     Exx = self.output.T @ self.output / len(self.output)
+        
+    #     # E[X]'
+    #     Ex = torch.mean(self.output, axis=0, keepdim=True)
+
+    #     C = Exx - Ex.T @ Ex
+    #     self.R.grad = torch.einsum('ij,jk->ik', C, self.R).clone() # NOTE: why was clone added in constence code?
     
 
 # #### 2D CONV
