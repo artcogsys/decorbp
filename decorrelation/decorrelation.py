@@ -106,6 +106,10 @@ class Decorrelation(AbstractDecorrelation):
         # loss as lower means absolute value of lower triangular part of C 
         return torch.mean(torch.abs(lower_triangular(C)))
 
+## DO WE WANT TO ADD THE SGD UPDATING TO THE FORWARD STEP? 
+
+## CAN WE SEPARATE OUT PATCH COMPUTATION AND THEN RECOMBINATION TO CONVOLUTIONAL OUTPUT? THIS MEANS MAPPING CONV INPUT TO SAME SIZE WHERE CHANNELS = INCHAN x H x W PATCHES AND W IS 1 x 1 CONVOLUTION
+
     # def update(self):
         # """ Better at decorrelating/whitening but poor at loss minimization
         # """
