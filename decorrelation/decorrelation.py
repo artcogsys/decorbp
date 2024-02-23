@@ -21,8 +21,10 @@ def decorrelation_parameters(model: nn.Module):
 def decorrelation_update(modules):
     """Updates all decorrelation modules
     """
+    loss = 0.0
     for m in modules:
-        m.update()     
+        loss += m.update()
+    return loss
 
 def lower_triangular(C):
     """Return lower triangular elements of a matrix as a vector
@@ -61,7 +63,6 @@ class Decorrelation(AbstractDecorrelation):
     efficient to combine this, as we do for the convolutions. On the other hand, we always need access to z=Rx so it may not matter...
     """
 
-    __constants__ = ['in_features']
     in_features: int
 
     def __init__(self, in_features: int, whiten=False, device=None, dtype=None) -> None:
@@ -93,14 +94,17 @@ class Decorrelation(AbstractDecorrelation):
     def update(self):
 
         # compute E[X'X]
-        Exx = self.output.T @ self.output / len(self.output)
+        C = self.output.T @ self.output / len(self.output)
         
         if self.whiten:
-            Exx -= self.eye
+            C -= self.eye
         else:
-            Exx *= self.neg_eye
+            C *= self.neg_eye
         
-        self.R.grad = Exx @ self.R
+        self.R.grad = C @ self.R
+
+        # loss as lower means absolute value of lower triangular part of C 
+        return torch.mean(torch.abs(lower_triangular(C)))
 
     # def update(self):
         # """ Better at decorrelating/whitening but poor at loss minimization
