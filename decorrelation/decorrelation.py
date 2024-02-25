@@ -10,7 +10,7 @@ import itertools
 def decorrelation_modules(model: nn.Module):
     """Returns the list of decorrelation modules
     """
-    return list(filter(lambda m: isinstance(m, AbstractDecorrelation), model.modules()))
+    return list(filter(lambda m: isinstance(m, Decorrelation), model.modules()))
 
 def decorrelation_parameters(model: nn.Module):
     """Returns all decorrelation parameters as an iterable
@@ -30,18 +30,18 @@ def lower_triangular(C, offset):
     """
     return C[torch.tril_indices(C.shape[0], C.shape[1], offset=offset).unbind()]
 
-class AbstractDecorrelation(nn.Module):
-    """Abstract base class for decorrelation so we can identify decorrelation modules.
-    """
+# class AbstractDecorrelation(nn.Module):
+#     """Abstract base class for decorrelation so we can identify decorrelation modules.
+#     """
 
-    def forward(self, input: Tensor) -> Tensor:
-        raise NotImplementedError
+#     def forward(self, input: Tensor) -> Tensor:
+#         raise NotImplementedError
     
-    def update(self): 
-        raise NotImplementedError
+#     def update(self): 
+#         raise NotImplementedError
     
 
-class Decorrelation(AbstractDecorrelation):
+class Decorrelation(nn.Module):
     r"""A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
 
     NOTE:
@@ -88,23 +88,30 @@ class Decorrelation(AbstractDecorrelation):
         self.R.grad = (4.0/self.d) * ( ((1-self.kappa)/(self.d - 1)) * L + self.kappa * V ) @ self.R
 
         # compute loss; equation (1) in technical note
-        return (1.0/self.d) * ( (2*(1-self.kappa)/(self.d - 1)) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
+        # return (1.0/self.d) * ( 2*(1-self.kappa)/(self.d - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
+
+        # as separate terms
+        decorrelation_loss = (2*(1-self.kappa))/(self.d * (self.d - 1)) * torch.trace(L @ L.T) 
+        variance_loss = (self.kappa/self.d) * torch.trace(V @ V.T)
+
+        return decorrelation_loss + variance_loss
 
 
-class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
+class DecorConv2d(nn.Conv2d):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1, bias: bool = False,
                  downsample_perc=1.0, kappa=0.0, device=None, dtype=None) -> None:
 
         factory_kwargs = {'device': device, 'dtype': dtype}
-        self.patch_length = in_channels * np.prod(kernel_size)
         self.downsample_perc = downsample_perc
+        self.d = in_channels * np.prod(kernel_size)
         self.kappa = kappa
 
+        # this generates patches (we could use unfold for this)
         super().__init__(
             in_channels=in_channels,
-            out_channels=self.patch_length,
+            out_channels=self.d,
             kernel_size=kernel_size,
             stride=stride,
             padding=padding,
@@ -113,7 +120,10 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
             **factory_kwargs
         )
 
-        self.forward_conv = nn.Conv2d(in_channels=self.patch_length,
+        self.decorrelator = Decorrelation(d=self.d, kappa=kappa, **factory_kwargs)
+
+        # this applies the kernel weights W
+        self.forward_conv = nn.Conv2d(in_channels=self.d,
                                         out_channels=out_channels,
                                         kernel_size=(1, 1),
                                         stride=(1, 1),
@@ -126,13 +136,14 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
 
         self.input = None
 
-        self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
-        self.register_buffer('neg_eye', 1.0 - torch.eye(self.patch_length, **factory_kwargs))
+        self.register_buffer('eye', torch.eye(self.d, **factory_kwargs))
+        self.register_buffer('neg_eye', 1.0 - torch.eye(self.d, **factory_kwargs))
 
     def reset_parameters(self) -> None:
-        w_square = self.weight.reshape(self.patch_length, self.patch_length)
+        w_square = self.weight.reshape(self.d, self.d)
         w_square = torch.nn.init.eye_(w_square)
-        self.weight = torch.nn.Parameter(w_square.reshape(self.patch_length, self.in_channels, * self.kernel_size))
+        self.weight = torch.nn.Parameter(w_square.reshape(self.d, self.in_channels, *self.kernel_size))
+        # reset downstream params?
 
     def forward(self, x: Tensor) -> Tensor:
 
@@ -164,21 +175,22 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
         # patches. Then we can just plug in Decorrelator. Downside is that we can't downsample (or must downsample for W as well...) and cant use the fast combined operation (since we need .X)
         sample_size = int(len(self.input) * self.downsample_perc)
         X = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
-
-
-
+        X = X.moveaxis(1,3).reshape(-1, X.shape[1])
 
         # strictly lower triangular part of x x' averaged over datapoints
-        L = torch.tril(self.X.T @ self.X) / len(self.X)
+        L = torch.tril(X.T @ X) / len(X)
 
         # unit variance term averaged over datapoints; faster via kronecker?
-        V = torch.diag(torch.mean(torch.square(self.X), axis=0) - 1)
+        V = torch.diag(torch.mean(torch.square(X), axis=0) - 1)
 
         # compute update; equation (3) in technical note
+
+        # HERE: R = weight; shape of R / W. We should be able to simplify this... ideally by operating on decorrelation weights; but this is the same weight as used for the efficient forward mapping.
+        # Can we replace with two separate steps using unfold and still be as efficient?
         self.R.grad = (4.0/self.d) * ( ((1-self.kappa)/(self.d - 1)) * L + self.kappa * V ) @ self.R
 
         # compute loss; equation (1) in technical note
-        return (1.0/self.d) * ( (2*(1-self.kappa)/(self.d - 1)) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
+        return (1.0/self.d) * ( 2*(1-self.kappa)/(self.d - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
 
 
 
