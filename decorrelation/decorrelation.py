@@ -79,6 +79,7 @@ class Decorrelation(AbstractDecorrelation):
             return torch.mean(torch.square(lower_triangular(C, offset=0)))
         else:
             self.R.grad = (C * self.neg_eye) @ self.R
+            # self.R.grad = torch.tril(C, diagonal=-1) @ self.R # WE WANT TO USE THIS
             return torch.mean(torch.square(lower_triangular(C, offset=-1)))
 
 
@@ -150,7 +151,8 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
     def update(self):
 
         # here we compute the patch outputs explicitly
-        # at this level we can downsample so this might be cheaper than explicitly computing in the above (since we otherwise average over patches x batches!!!)
+        # at this level we can downsample so this can 
+        # be cheaper than explicitly computing in the above (since we otherwise average over patches x batches!!!)
         sample_size = int(len(self.input) * self.downsample_perc)
         x = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
 
@@ -168,9 +170,67 @@ class DecorConv2d(nn.Conv2d, AbstractDecorrelation):
         else:
             return torch.mean(torch.square(lower_triangular(C, offset=-1)))
 
-
+## PLAYGROUND
         
+class DecorrelationPatch2d(torch.nn.Module):
 
+    def __init__(self,
+                in_channels: int,
+                kernel_size: _size_2_t,
+                whiten: bool = False,
+                device=None,
+                dtype=None) -> None:
+
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.kernel_size = kernel_size
+        self.whiten = whiten
+
+        self.patch_length = in_channels * np.prod(kernel_size) # number of elements in a patch to be represented as channels
+        self.unfold = torch.nn.Unfold(kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
+
+        self.fold = None
+        self.divisor = None
+
+        self.register_buffer('R', torch.eye(self.patch_length, **factory_kwargs))
+        self.register_buffer('eye', torch.eye(self.patch_length, **factory_kwargs))
+        self.register_buffer('neg_eye', 1.0 - torch.eye(self.patch_length, **factory_kwargs))
+
+    def forward(self, input: Tensor) -> Tensor:
+
+        # transform from tensor to patch representation
+        z = self.unfold(input) # [N, C*H*W, P]
+
+        # apply decorrelating transform
+        self.output = torch.einsum('nij,ik->nij', z, self.R) # decorrelated patches [N, C*H*W, P]
+
+        # transform from patch to tensor representation
+        if self.fold is None: # we only compute this once
+            self.fold = torch.nn.Fold(output_size=input.shape[-2:], kernel_size=self.kernel_size, stride=1, padding=0, dilation=1)
+            self.divisor = self.fold(self.unfold(torch.ones_like(input)))
+
+        # we could create a path mask and apply this. But there is likely a more direct route
+        # z = self.output
+        # self.fold(z)
+         
+        # BUT THIS SHOULD ALSO JUST WORK.. WHY NOT?
+        return self.fold(self.output) / self.divisor # [N, C, H, W]
+    
+    def update(self):
+        C = torch.einsum('nip,njp->ij', self.output, self.output) / (self.output.shape[0] * self.output.shape[2]) # double check if this is correct
+        if self.whiten:
+            C -= self.eye
+        else:
+            C *= self.neg_eye
+        self.R.grad = torch.einsum('ij,jk->ik', C, self.R)
+        
+        # decorrelation loss computed per patch
+        if self.whiten:
+            return torch.mean(torch.square(lower_triangular(C, offset=0)))
+        else:
+            return torch.mean(torch.square(lower_triangular(C, offset=-1)))
 # """
 # Options:
 #     - patchwise decorrelation as we do now
