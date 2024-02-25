@@ -1,3 +1,5 @@
+This repository implements the updated decorrelation approach
+
 ## Improvements
 
 - only update lower triangular part
