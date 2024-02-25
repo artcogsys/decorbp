@@ -94,7 +94,7 @@ class Decorrelation(nn.Module):
         decorrelation_loss = (2*(1-self.kappa))/(self.d * (self.d - 1)) * torch.trace(L @ L.T) 
         variance_loss = (self.kappa/self.d) * torch.trace(V @ V.T)
 
-        return decorrelation_loss + variance_loss
+        return decorrelation_loss, variance_loss
 
 
 class DecorConv2d(nn.Conv2d):
