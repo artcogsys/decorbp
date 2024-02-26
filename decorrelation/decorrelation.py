@@ -30,16 +30,6 @@ def lower_triangular(C, offset):
     """
     return C[torch.tril_indices(C.shape[0], C.shape[1], offset=offset).unbind()]
 
-# class AbstractDecorrelation(nn.Module):
-#     """Abstract base class for decorrelation so we can identify decorrelation modules.
-#     """
-
-#     def forward(self, input: Tensor) -> Tensor:
-#         raise NotImplementedError
-    
-#     def update(self): 
-#         raise NotImplementedError
-    
 
 class Decorrelation(nn.Module):
     r"""A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
@@ -91,8 +81,7 @@ class Decorrelation(nn.Module):
         decorrelation_loss = (2*(1-self.kappa))/(self.size * (self.size - 1)) * torch.trace(L @ L.T) 
         variance_loss = (self.kappa/self.size) * torch.trace(V @ V.T)
         # return (1.0/self.d) * ( 2*(1-self.kappa)/(self.d - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
-        # CLONE? FLIP? => Laatste alleen relevant voor W niet R... 
-        # ERGENS GAAT IETS MIS IN TRANSFORM VAN ENE NAAR ANDERE REPRESENTATIE... 
+      
         return decorrelation_loss, variance_loss
 
 
@@ -105,33 +94,14 @@ class DecorConv2d(Decorrelation):
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        # OUT_CHANNELS MISSING?!?!?! CHECK SELF.WEIGHT
         super().__init__(size=in_channels * np.prod(kernel_size), kappa=kappa, **factory_kwargs)        
         self.downsample_perc = downsample_perc
-        # self.size = in_channels * np.prod(kernel_size)
-        # self.kappa = kappa
 
-        # this generates patches (we could use unfold for this)
-        # super().__init__(
-        #     in_channels=in_channels,
-        #     out_channels=self.size,
-        #     kernel_size=kernel_size,
-        #     stride=stride,
-        #     padding=padding,
-        #     dilation=dilation,
-        #     bias=False,
-        #     **factory_kwargs
-        # )
         self.in_channels = in_channels
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
         self.dilation = dilation
-
-        # used to map inputs to patches
-        # disadvantage is that it is only defined for 2d inputs
-        # self.unfold = torch.nn.Unfold(kernel_size=self.kernel_size, stride=self.stride,
-        #                               padding=self.padding, dilation=self.dilation)
 
         # this applies the kernel weights
         self.forward_conv = nn.Conv2d(in_channels=self.size,
@@ -143,43 +113,17 @@ class DecorConv2d(Decorrelation):
                                         bias=bias is not None, # ?
                                         **factory_kwargs)
 
-        # self.weight.requires_grad_(False)
-
         self.input = None
-
-        # self.register_buffer('eye', torch.eye(self.size, **factory_kwargs))
-        # self.register_buffer('neg_eye', 1.0 - torch.eye(self.size, **factory_kwargs))
-
-    # def reset_parameters(self) -> None:
-    #     w_square = self.weight.reshape(self.size, self.size)
-    #     w_square = torch.nn.init.eye_(w_square)
-    #     self.weight = torch.nn.Parameter(w_square.reshape(self.size, self.in_channels, *self.kernel_size), requires_grad=False)
 
     def forward(self, input: Tensor) -> Tensor:
 
         self.input = input
 
-        # self.conv used in 2 places:
-        # - weight convolution. But weight is simply [size, in_channels, kernel_size] so we can use unfold and then reshape
-        # - forward convolution. This is a 1x1 convolution so we can use unfold and then reshape
-
         # combines the patch-wise R update with the convolutional W update
-        # in_chan=2, out_chan=kernel = 5x5, 50 patches
-        # self.weight = [50, 2, 5, 5] mapping from inputs to patches; this means each patch gets its own decorrelation matrix
-        # self.forward_conv.weight = [3, 50, 1, 1] mapping from patches to outputs using 1x1 convolutions
-        # weight = [3, 2, 5, 5] performing the linear mapping RW per patch with W fixed and R variable
-        # moveaxis(0,1) creates [2, 50, 5, 5] input meaning that the convolutional weight is multiplied with each decorrelation kernel
-        # [2, 50, 5, 5] x [3, 50, 1, 1] => moveaxis(0,1) => [3, 2, 5, 5]
-        # flip reorders the order of the elements!
-        # if we handle this by Decorrelation then we need to create 50 Decorrelation objects; way less efficient
         weight = nn.functional.conv2d(self.R.view(self.size, self.in_channels, *self.kernel_size).moveaxis(0, 1),
                                       self.forward_conv.weight.flip(-1, -2),
                                       padding=0).moveaxis(0, 1)
-        
-        # weight = nn.functional.conv2d(self.weight.moveaxis(0, 1),
-        #                                     self.forward_conv.weight.flip(-1, -2),
-        #                                     padding=0).moveaxis(0, 1)
-        
+                
         # applies the combined weight to generate the desired output
         self.forward_conv.output = nn.functional.conv2d(input, weight,
                                          stride=self.stride,
@@ -198,196 +142,10 @@ class DecorConv2d(Decorrelation):
         x = x.moveaxis(1, 3)
         x = x.reshape(-1, self.size)
         return x
-        # return self.unfold(input).moveaxis(1,2).reshape(-1, self.size) # or view? # GAAT HIER IETS MIS?????
-
+        
     def update(self):
 
-        # sample_size = int(len(self.input) * self.downsample_perc)
-        # x = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
-        # x = x.moveaxis(1, 3)
-        # x = x.reshape(-1, self.size)
         self.X = self.patches(self.input[np.random.choice(np.arange(len(self.input)),
                                                       size= int(len(self.input) * self.downsample_perc))])
         
-        # SOMETHING WEIRD REMAINING: ORIGINAL APPROACH USES DIFFERENT R FOR ALL LOCATIONS
-        # HERE WE COMPRESS INTO ONE 50 x 50 R...
         return super().update()
-
-        # # assuming kappa = 0.0 for now
-        # corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) * self.neg_eye
-
-        # #  if debug:
-        # decor_loss = torch.mean(torch.abs(corr)) # WHAT DOES THIS TELL US ABOUT OUR NEW LOSS??
-
-        # weight = self.weight
-        # weight = weight.reshape(-1, np.prod(weight.shape[1:]))
-        # decor_update = torch.einsum('ij,jk->ik', corr, weight)
-        # decor_update = decor_update.reshape(self.weight.shape)
-
-        # self.weight.grad = decor_update.clone()
-
-        # return decor_loss.item(), 0.0
-    
-        # x = self.input
-
-        # C = torch.einsum('nipq,njpq->ij', x, x) / (x.shape[0] * x.shape[2] * x.shape[3])
-
-        # # if self.whiten:
-        # #     C -= self.eye
-        # # else:
-        # #     C *= self.neg_eye
-
-        # # assuming kappa = 0.0
-        # C *= self.neg_eye
-
-        # self.weight.grad = torch.einsum('ij,jabc->iabc', C, self.weight)
-
-        # # decorrelation loss computed per patch
-        # # if self.whiten:
-        # #     return torch.mean(torch.square(lower_triangular(C, offset=0)))
-        # # else:
-        # return torch.mean(torch.square(lower_triangular(C, offset=-1))), 0.0
-
-
-        # # here we compute the patch outputs explicitly. At this level we can downsample so this can 
-        # # be cheaper than explicitly computing in the above (since we otherwise average over patches x batches!!!)
-        # # from a coding perspective it would be more elegant to define a decorrelator within the conv layer which operates on the
-        # # patches. Then we can just plug in Decorrelator. Downside is that we can't downsample (or must downsample for W as well...) and cant use the fast combined operation (since we need .X)
-        # sample_size = int(len(self.input) * self.downsample_perc)
-        # X = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
-        # X = X.moveaxis(1,3).reshape(-1, X.shape[1])
-
-        # # strictly lower triangular part of x x' averaged over datapoints
-        # L = torch.tril(X.T @ X) / len(X)
-
-        # # unit variance term averaged over datapoints; faster via kronecker?
-        # V = torch.diag(torch.mean(torch.square(X), axis=0) - 1)
-
-        # # compute update; equation (3) in technical note
-
-        # # HERE: R = weight; shape of R / W. We should be able to simplify this... ideally by operating on decorrelation weights; but this is the same weight as used for the efficient forward mapping.
-        # # Can we replace with two separate steps using unfold and still be as efficient?
-        # self.R.grad = (4.0/self.d) * ( ((1-self.kappa)/(self.d - 1)) * L + self.kappa * V ) @ self.R
-
-        # # compute loss; equation (1) in technical note
-        # return (1.0/self.d) * ( 2*(1-self.kappa)/(self.d - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
-
-
-
-        # C = torch.einsum('nipq,njpq->ij', x, x) / (x.shape[0] * x.shape[2] * x.shape[3])
-        # if self.whiten:
-        #     C -= self.eye
-        # else:
-        #     C *= self.neg_eye
-
-        # self.weight.grad = torch.einsum('ij,jabc->iabc', C, self.weight)
-
-        # # decorrelation loss computed per patch
-        # if self.whiten:
-        #     return torch.mean(torch.square(lower_triangular(C, offset=0)))
-        # else:
-        #     return torch.mean(torch.square(lower_triangular(C, offset=-1)))
-
-
-
-
-class DecorConv2dOrig(nn.Conv2d):
-
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
-                 stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1, bias: bool = False,
-                 downsample_perc=1.0, kappa=0.0, device=None, dtype=None) -> None:
-
-        factory_kwargs = {'device': device, 'dtype': dtype}
-        self.downsample_perc = downsample_perc
-        self.size = in_channels * np.prod(kernel_size)
-        self.kappa = kappa
-
-        # this generates patches (we could use unfold for this)
-        super().__init__(
-            in_channels=in_channels,
-            out_channels=self.size,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            bias=False,
-            **factory_kwargs
-        )
-
-        # this applies the kernel weights W
-        self.forward_conv = nn.Conv2d(in_channels=in_channels * np.prod(kernel_size),
-                                        out_channels=out_channels,
-                                        kernel_size=(1, 1),
-                                        stride=(1, 1),
-                                        padding=0,
-                                        dilation=(1, 1),
-                                        bias=bias is not None, # ?
-                                        **factory_kwargs)
-
-        self.weight.requires_grad_(False)
-
-        self.input = None
-
-        self.register_buffer('eye', torch.eye(self.size, **factory_kwargs))
-        self.register_buffer('neg_eye', 1.0 - torch.eye(self.size, **factory_kwargs))
-
-    def reset_parameters(self) -> None:
-        w_square = self.weight.reshape(self.size, self.size)
-        w_square = torch.nn.init.eye_(w_square)
-        self.weight = torch.nn.Parameter(w_square.reshape(self.size, self.in_channels, *self.kernel_size), requires_grad=False)
-
-    def forward(self, x: Tensor) -> Tensor:
-
-        self.input = x
-
-        # self.conv used in 2 places:
-        # - weight convolution. But weight is simply [size, in_channels, kernel_size] so we can use unfold and then reshape
-        # - forward convolution. This is a 1x1 convolution so we can use unfold and then reshape
-
-        # combines the patch-wise R update with the convolutional W update
-        # in_chan=2, out_chan=kernel = 5x5, 50 patches
-        # self.weight = [50, 2, 5, 5] mapping from inputs to patches; this means each patch gets its own decorrelation matrix
-        # self.forward_conv.weight = [3, 50, 1, 1] mapping from patches to outputs using 1x1 convolutions
-        # weight = [3, 2, 5, 5] performing the linear mapping RW per patch with W fixed and R variable
-        # moveaxis(0,1) creates [2, 50, 5, 5] input meaning that the convolutional weight is multiplied with each decorrelation kernel
-        # [2, 50, 5, 5] x [3, 50, 1, 1] => moveaxis(0,1) => [3, 2, 5, 5]
-        # unclear why we perform the weight flip...
-        # if we handle this by Decorrelation then we need to create 50 Decorrelation objects; way less efficient
-        weight = nn.functional.conv2d(self.weight.moveaxis(0, 1),
-                                            self.forward_conv.weight.flip(-1, -2),
-                                            padding=0).moveaxis(0, 1)
-        
-        # applies the combined weight to generate the desired output
-        self.forward_conv.output = nn.functional.conv2d(x, weight,
-                                         stride=self.stride,
-                                         dilation=self.dilation,
-                                         padding=self.padding)
-
-        # needed for BP gradient propagation
-        self.forward_conv.output.requires_grad_(True)
-        self.forward_conv.output.retain_grad()
-        
-        return self.forward_conv.output
-
-    def update(self):
-
-        sample_size = int(len(self.input) * self.downsample_perc)
-        x = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
-        x = x.moveaxis(1, 3)
-        x = x.reshape(-1, self.size)
-
-        # assuming kappa = 0.0 for now
-        corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) * self.neg_eye
-
-        # THIS IS THE CORRECT MEASURE:
-        decor_loss = torch.mean(lower_triangular(torch.square(corr), offset=-1))
-
-        weight = self.weight
-        weight = weight.reshape(-1, np.prod(weight.shape[1:]))
-        decor_update = torch.einsum('ij,jk->ik', corr, weight)
-        decor_update = decor_update.reshape(self.weight.shape)
-
-        self.weight.grad = decor_update.clone()
-
-        return decor_loss.item(), 0.0
-    
