@@ -140,7 +140,7 @@ class DecorConv2d(nn.Conv2d):
     def reset_parameters(self) -> None:
         w_square = self.weight.reshape(self.size, self.size)
         w_square = torch.nn.init.eye_(w_square)
-        self.weight = torch.nn.Parameter(w_square.reshape(self.size, self.in_channels, *self.kernel_size))
+        self.weight = torch.nn.Parameter(w_square.reshape(self.size, self.in_channels, *self.kernel_size), requires_grad=False)
 
     def forward(self, x: Tensor) -> Tensor:
 
@@ -155,12 +155,12 @@ class DecorConv2d(nn.Conv2d):
         # [2, 50, 5, 5] x [3, 50, 1, 1] => moveaxis(0,1) => [3, 2, 5, 5]
         # unclear why we perform the weight flip...
         # if we handle this by Decorrelation then we need to create 50 Decorrelation objects; way less efficient
-        weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1),
+        weight = nn.functional.conv2d(self.weight.moveaxis(0, 1),
                                             self.forward_conv.weight.flip(-1, -2),
                                             padding=0).moveaxis(0, 1)
         
         # applies the combined weight to generate the desired output
-        self.forward_conv.output = torch.nn.functional.conv2d(x, weight,
+        self.forward_conv.output = nn.functional.conv2d(x, weight,
                                          stride=self.stride,
                                          dilation=self.dilation,
                                          padding=self.padding)
@@ -171,28 +171,47 @@ class DecorConv2d(nn.Conv2d):
         
         return self.forward_conv.output
 
-
     def update(self):
 
-        x = self.input
+        sample_size = int(len(self.input) * self.downsample_perc)
+        x = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
+        x = x.moveaxis(1, 3)
+        x = x.reshape(-1, self.size)
 
-        C = torch.einsum('nipq,njpq->ij', x, x) / (x.shape[0] * x.shape[2] * x.shape[3])
+        # assuming kappa = 0.0 for now
+        corr = (1 / len(x)) * torch.einsum('ki,kj->ij', x, x) * self.neg_eye
 
-        # if self.whiten:
-        #     C -= self.eye
-        # else:
-        #     C *= self.neg_eye
+        #  if debug:
+        decor_loss = torch.mean(torch.abs(corr)) # WHAT DOES THIS TELL US ABOUT OUR NEW LOSS??
 
-        # assuming kappa = 0.0
-        C *= self.neg_eye
+        weight = self.weight
+        weight = weight.reshape(-1, np.prod(weight.shape[1:]))
+        decor_update = torch.einsum('ij,jk->ik', corr, weight)
+        decor_update = decor_update.reshape(self.weight.shape)
 
-        self.weight.grad = torch.einsum('ij,jabc->iabc', C, self.weight)
+        self.weight.grad = decor_update.clone()
 
-        # decorrelation loss computed per patch
-        # if self.whiten:
-        #     return torch.mean(torch.square(lower_triangular(C, offset=0)))
-        # else:
-        return torch.mean(torch.square(lower_triangular(C, offset=-1))), 0.0
+        return decor_loss.item(), 0.0
+    
+        # x = self.input
+
+        # C = torch.einsum('nipq,njpq->ij', x, x) / (x.shape[0] * x.shape[2] * x.shape[3])
+
+        # # if self.whiten:
+        # #     C -= self.eye
+        # # else:
+        # #     C *= self.neg_eye
+
+        # # assuming kappa = 0.0
+        # C *= self.neg_eye
+
+        # self.weight.grad = torch.einsum('ij,jabc->iabc', C, self.weight)
+
+        # # decorrelation loss computed per patch
+        # # if self.whiten:
+        # #     return torch.mean(torch.square(lower_triangular(C, offset=0)))
+        # # else:
+        # return torch.mean(torch.square(lower_triangular(C, offset=-1))), 0.0
 
 
         # # here we compute the patch outputs explicitly. At this level we can downsample so this can 
