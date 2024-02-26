@@ -8,6 +8,131 @@ import numpy as np
 from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 from torch.nn.modules.utils import _pair
 
+
+
+class DecorConv2d(nn.Module):
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
+                 stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1, bias: bool = False,
+                 downsample_perc=1.0, kappa=0.0, device=None, dtype=None) -> None:
+
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__()
+
+        self.downsample_perc = downsample_perc
+        # self.d = in_channels * np.prod(kernel_size)
+        self.kappa = kappa
+
+        # # this generates patches (we could use unfold for this)
+        # super().__init__(
+        #     in_channels=in_channels,
+        #     out_channels=self.d,
+        #     kernel_size=kernel_size,
+        #     stride=stride,
+        #     padding=padding,
+        #     dilation=dilation,
+        #     bias=False,
+        #     **factory_kwargs
+        # )
+        self.in_channels = in_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+
+        self.decorrelator = Decorrelation(size=in_channels * np.prod(kernel_size), kappa=kappa, **factory_kwargs)
+
+        # this applies the kernel weights W
+        self.forward_conv = nn.Conv2d(in_channels=in_channels * np.prod(kernel_size),
+                                        out_channels=out_channels,
+                                        kernel_size=(1, 1),
+                                        stride=(1, 1),
+                                        padding=0,
+                                        dilation=(1, 1),
+                                        bias=bias is not None, # ?
+                                        **factory_kwargs)
+
+        # self.weight.requires_grad_(False)
+
+        self.input = None
+
+        # self.register_buffer('eye', torch.eye(self.d, **factory_kwargs))
+        # self.register_buffer('neg_eye', 1.0 - torch.eye(self.d, **factory_kwargs))
+
+    # def reset_parameters(self) -> None:
+    #     w_square = self.weight.reshape(self.d, self.d)
+    #     w_square = torch.nn.init.eye_(w_square)
+    #     self.weight = torch.nn.Parameter(w_square.reshape(self.d, self.in_channels, *self.kernel_size))
+    #     # reset downstream params?
+
+    def forward(self, x: Tensor) -> Tensor:
+
+        self.input = x
+
+        # combines the patch-wise R update with the convolutional W update
+        # 50 x 2 x 5 x 5
+        
+        weight = torch.nn.functional.conv2d(self.weight.moveaxis(0, 1),
+                                            self.forward_conv.weight.flip(-1, -2),
+                                            padding=0).moveaxis(0, 1)
+        
+        # applies the combined weight to generate the desired output
+        self.forward_conv.output = torch.nn.functional.conv2d(x, weight,
+                                         stride=self.stride,
+                                         dilation=self.dilation,
+                                         padding=self.padding)
+
+        # needed for BP gradient propagation
+        self.forward_conv.output.requires_grad_(True)
+        self.forward_conv.output.retain_grad()
+        
+        return self.forward_conv.output
+
+
+    def update(self):
+
+        # here we compute the patch outputs explicitly. At this level we can downsample so this can 
+        # be cheaper than explicitly computing in the above (since we otherwise average over patches x batches!!!)
+        # from a coding perspective it would be more elegant to define a decorrelator within the conv layer which operates on the
+        # patches. Then we can just plug in Decorrelator. Downside is that we can't downsample (or must downsample for W as well...) and cant use the fast combined operation (since we need .X)
+        sample_size = int(len(self.input) * self.downsample_perc)
+        X = super().forward(self.input[np.random.choice(np.arange(len(self.input)), sample_size)])
+        X = X.moveaxis(1,3).reshape(-1, X.shape[1])
+
+        # strictly lower triangular part of x x' averaged over datapoints
+        L = torch.tril(X.T @ X) / len(X)
+
+        # unit variance term averaged over datapoints; faster via kronecker?
+        V = torch.diag(torch.mean(torch.square(X), axis=0) - 1)
+
+        # compute update; equation (3) in technical note
+
+        # HERE: R = weight; shape of R / W. We should be able to simplify this... ideally by operating on decorrelation weights; but this is the same weight as used for the efficient forward mapping.
+        # Can we replace with two separate steps using unfold and still be as efficient?
+        self.R.grad = (4.0/self.d) * ( ((1-self.kappa)/(self.d - 1)) * L + self.kappa * V ) @ self.R
+
+        # compute loss; equation (1) in technical note
+        return (1.0/self.d) * ( 2*(1-self.kappa)/(self.d - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
+
+
+
+        # C = torch.einsum('nipq,njpq->ij', x, x) / (x.shape[0] * x.shape[2] * x.shape[3])
+        # if self.whiten:
+        #     C -= self.eye
+        # else:
+        #     C *= self.neg_eye
+
+        # self.weight.grad = torch.einsum('ij,jabc->iabc', C, self.weight)
+
+        # # decorrelation loss computed per patch
+        # if self.whiten:
+        #     return torch.mean(torch.square(lower_triangular(C, offset=0)))
+        # else:
+        #     return torch.mean(torch.square(lower_triangular(C, offset=-1)))
+
+
+
+
 class DecorrelationPatch2d(torch.nn.Module):
 
     def __init__(self,
