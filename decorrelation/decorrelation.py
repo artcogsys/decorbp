@@ -33,32 +33,35 @@ def lower_triangular(C, offset):
 
 class Decorrelation(nn.Module):
     r"""A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input.
-
-    NOTE:
-    We combine this with a linear layer to implement the transformation. If the batch size is larger than the number of outputs it can be more 
-    efficient to combine this, as we do for the convolutions. On the other hand, we always need access to z=Rx so it may not matter...
     """
 
-    size: int
-
-    def __init__(self, size: int, kappa=0.0, device=None, dtype=None) -> None:
+    def __init__(self, dim: int, kappa=0.0, device=None, dtype=None) -> None:
         """"Params:
-            - size: input size
+            - dim: input dimensionality
             - kappa: weighting between decorrelation (0.0) and unit variance (1.0)
         """
 
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
 
-        self.size = size
+        self.dim = dim
         self.kappa = kappa
-        self.R = nn.Parameter(torch.eye(self.size, **factory_kwargs), requires_grad=False)
+        self.R = nn.Parameter(torch.eye(self.dim, **factory_kwargs), requires_grad=False)
+        self.X = None
 
     def reset_parameters(self) -> None:
         nn.init.eye(self.R)
 
+    def __call__(self, input: Tensor):
+        """This call function just applies the decorrelating transform. Should not be used for training since it does not store
+        requires statistics. Can be overloaded in composite functions to just return the decorrelating transform 
+        """
+        return F.linear(input.view(len(input), -1), self.R)
+
     def forward(self, input: Tensor) -> Tensor:
-        """Decorrelates the input. Maps back if needed
+        """Decorrelates the input. Maps back if needed. self.X is the decorrelated input. Stored here for updating in self.update().
+        For node perturbation we can decide to continuously update in the forward pass without separate update functions.
+        This cannot be done when combining with BP since we cannot change the computational graph before applying the backward pass.        
         """
         self.X = F.linear(input.view(len(input), -1), self.R)
         return self.X.view(input.shape)
@@ -69,20 +72,27 @@ class Decorrelation(nn.Module):
         """
 
         # strictly lower triangular part of x x' averaged over datapoints
-        L = torch.tril(self.X.T @ self.X) / len(self.X)
+        L = torch.tril(self.X.T @ self.X, diagonal=-1) / len(self.X)
 
-        # unit variance term averaged over datapoints; faster via kronecker?
+        # unit variance term averaged over datapoints
         V = torch.diag(torch.mean(torch.square(self.X), axis=0) - 1)
 
         # compute update; equation (3) in technical note
-        self.R.grad = (4.0/self.size) * ( ((1-self.kappa)/(self.size - 1)) * L + self.kappa * V ) @ self.R
+        self.R.grad = (4.0/self.dim) * ( ((1-self.kappa)/(self.dim - 1)) * L + self.kappa * V ) @ self.R
 
         # compute loss; equation (1) in technical note as separate terms
-        decorrelation_loss = (2*(1-self.kappa))/(self.size * (self.size - 1)) * torch.trace(L @ L.T) 
-        variance_loss = (self.kappa/self.size) * torch.trace(V @ V.T)
         # return (1.0/self.d) * ( 2*(1-self.kappa)/(self.d - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
+        decorrelation_loss = (2*(1-self.kappa))/(self.dim * (self.dim - 1)) * torch.trace(L @ L.T) 
+        variance_loss = (self.kappa/self.dim) * torch.trace(V @ V.T)
       
         return decorrelation_loss, variance_loss
+
+class DecorLinear(Decorrelation):
+
+    #     NOTE:
+    # We combine this with a linear layer to implement the transformation. If the batch size is larger than the number of outputs it can be more 
+    # efficient to combine this, as we do for the convolutions. On the other hand, we always need access to z=Rx so it may not matter...
+    pass
 
 
 class DecorConv2d(Decorrelation):
@@ -94,7 +104,7 @@ class DecorConv2d(Decorrelation):
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(size=in_channels * np.prod(kernel_size), kappa=kappa, **factory_kwargs)        
+        super().__init__(dim=in_channels * np.prod(kernel_size), kappa=kappa, **factory_kwargs)        
         self.downsample_perc = downsample_perc
 
         self.in_channels = in_channels
@@ -104,7 +114,7 @@ class DecorConv2d(Decorrelation):
         self.dilation = dilation
 
         # this applies the kernel weights
-        self.forward_conv = nn.Conv2d(in_channels=self.size,
+        self.forward_conv = nn.Conv2d(in_channels=self.dim,
                                         out_channels=out_channels,
                                         kernel_size=(1, 1),
                                         stride=(1, 1),
@@ -119,8 +129,8 @@ class DecorConv2d(Decorrelation):
 
         self.input = input
 
-        # combines the patch-wise R update with the convolutional W update
-        weight = nn.functional.conv2d(self.R.view(self.size, self.in_channels, *self.kernel_size).moveaxis(0, 1),
+        # efficiently combines the patch-wise R update with the convolutional W update
+        weight = nn.functional.conv2d(self.R.view(self.dim, self.in_channels, *self.kernel_size).moveaxis(0, 1),
                                       self.forward_conv.weight.flip(-1, -2),
                                       padding=0).moveaxis(0, 1)
                 
@@ -136,16 +146,14 @@ class DecorConv2d(Decorrelation):
         
         return self.forward_conv.output
 
-    def patches(self, input):
-        x = nn.functional.conv2d(input, self.R.reshape(self.size, self.in_channels, *self.kernel_size),
-                                    bias=None, stride=self.stride, padding=self.padding, dilation=self.dilation)
-        x = x.moveaxis(1, 3)
-        x = x.reshape(-1, self.size)
-        return x
+    def __call__(self, input):
+        """Returns the decorrelated input as patches
+        """
+        return nn.functional.conv2d(input, self.R.view(self.dim, self.in_channels, *self.kernel_size),
+                                    bias=None, stride=self.stride, padding=self.padding, 
+                                    dilation=self.dilation).moveaxis(1, 3).reshape(-1, self.dim)
         
     def update(self):
-
-        self.X = self.patches(self.input[np.random.choice(np.arange(len(self.input)),
+        self.X = self.__call__(self.input[np.random.choice(np.arange(len(self.input)),
                                                       size= int(len(self.input) * self.downsample_perc))])
-        
         return super().update()

@@ -1,8 +1,7 @@
 This repository implements the updated decorrelation approach
 
-## Improvements
+## TO DO
+- update experiments
+- make this into examples notebooks
+- use experiments for large scale
 
-- only update lower triangular part
-- separate on and off-diagonal parts
-- add validation loss
-- ...
