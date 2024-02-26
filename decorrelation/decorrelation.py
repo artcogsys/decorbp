@@ -146,6 +146,10 @@ class DecorConv2d(nn.Conv2d):
 
         self.input = x
 
+        # self.conv used in 2 places:
+        # - weight convolution. But weight is simply [size, in_channels, kernel_size] so we can use unfold and then reshape
+        # - forward convolution. This is a 1x1 convolution so we can use unfold and then reshape
+
         # combines the patch-wise R update with the convolutional W update
         # in_chan=2, out_chan=kernel = 5x5, 50 patches
         # self.weight = [50, 2, 5, 5] mapping from inputs to patches; this means each patch gets its own decorrelation matrix
