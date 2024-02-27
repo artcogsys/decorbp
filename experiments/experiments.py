@@ -22,7 +22,7 @@ def get_experiment(args, device):
 
         train_loader, test_loader, input_dim = get_MNIST(args)
         
-        model = Convnet(in_channels=input_dim[0], kappa=args.kappa).to(device)
+        model = ConvNet(in_channels=input_dim[0], kappa=args.kappa).to(device)
 
         lossfun = torch.nn.CrossEntropyLoss().to(device)
 
