@@ -78,11 +78,6 @@ class Decorrelation(nn.Module):
         # compute loss; equation (1) in technical note
         return (1.0/self.dim) * ( 2*(1-self.kappa)/(self.dim - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
         
-        # as separate terms
-        # decorrelation_loss = (2*(1-self.kappa))/(self.dim * (self.dim - 1)) * torch.trace(L @ L.T) 
-        # variance_loss = (self.kappa/self.dim) * torch.trace(V @ V.T)
-        # return decorrelation_loss, variance_loss
-
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
