@@ -1,5 +1,6 @@
---lr=1e-2
+--lr=1e-4
 --lr_decor=1e-1
+--kappa=0
 --epochs=20
 --batch_size=64
 --num_workers=0

@@ -5,7 +5,6 @@ import numpy as np
 import argparse
 from experiments import get_experiment
 from decorrelation.train import decor_train
-import time
 
 def parse_arguments():
 
@@ -43,6 +42,4 @@ if __name__ == '__main__':
             print('Regular BP:')
             args.lr_decor = 0.0
 
-        tic = time.time()
-        model, L = decor_train(args, model, lossfun, train_loader, device)
-        print(f'time elapsed: {time.time() - tic:.3f} s')
+        res = decor_train(args, model, lossfun, train_loader, device)

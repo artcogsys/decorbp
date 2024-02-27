@@ -14,8 +14,8 @@ class MLP(nn.Sequential):
     
 class Convnet(nn.Sequential):
 
-    def __init__(self, input_dim):
-        in_channels = input_dim[0]
+    def __init__(self, in_channels, kappa=0.0):
+        # in_channels = input_dim[0]
         # super().__init__(DecorrelationPatch2d(in_channels, kernel_size=(5,5)),
         #                 nn.Conv2d(in_channels, out_channels=10, kernel_size=(5,5)),
         #                 nn.ReLU(),
@@ -24,7 +24,7 @@ class Convnet(nn.Sequential):
         #                 nn.Linear(5760, 10)
         #                 )
 
-        super().__init__(DecorConv2d(in_channels, out_channels=10, kernel_size=(5,5)),
+        super().__init__(DecorConv2d(in_channels, out_channels=10, kernel_size=(5,5), kappa=kappa),
                         nn.ReLU(),
                         nn.Flatten(),
                         nn.Linear(5760, 10)
