@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import argparse
 from experiments import get_experiment
-from decorrelation.train import train_loop
+from decorrelation.train import decor_train
 import time
 
 def parse_arguments():
@@ -12,14 +12,15 @@ def parse_arguments():
     parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--lr', default=1e-3, type=float)
-    parser.add_argument('--lr_decor', default=1e-3, type=float, help="learning rate for decorrelation update")
+    parser.add_argument('--lr_decor', default=1e1, type=float, help="learning rate for decorrelation update") # NOTE: different scale!
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--num_workers', default=0, type=int)
     parser.add_argument('--train_samples', default=-1, type=int, help="number of train samples (-1 = all)")
     parser.add_argument('--test_samples', default=-1, type=int, help="number of test samples (-1 = all)")
-    parser.add_argument('--experiment', default='MNIST', type=str)
+    parser.add_argument('--experiment', default='MNIST_MLP', type=str)
     parser.add_argument('--data_path', default='~/Data', type=str)
+    parser.add_argument('--kappa', default=0.0, type=float)
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -43,5 +44,5 @@ if __name__ == '__main__':
             args.lr_decor = 0.0
 
         tic = time.time()
-        model, L = train_loop(args, model, lossfun, train_loader, device)
+        model, L = decor_train(args, model, lossfun, train_loader, device)
         print(f'time elapsed: {time.time() - tic:.3f} s')

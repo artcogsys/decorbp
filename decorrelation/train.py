@@ -1,13 +1,13 @@
 import torch
 import numpy as np
-from decorrelation.decorrelation import decorrelation_parameters, decorrelation_modules, decorrelation_update #, covariance
+from decorrelation.decorrelation import decor_parameters, decor_module, decor_update #, covariance
 
-def train_loop(args, model, lossfun, train_loader, device):
+def decor_train(args, model, lossfun, train_loader, device):
 
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-        decorrelators = decorrelation_modules(model)
-        decor_optimizer = torch.optim.SGD(decorrelation_parameters(model), lr=args.lr_decor)
+        decorrelators = decor_module(model)
+        decor_optimizer = torch.optim.SGD(decor_parameters(model), lr=args.lr_decor)
 
         L = np.zeros(args.epochs+1) # loss
         D = np.zeros(args.epochs+1) # decorrelation loss
@@ -28,7 +28,7 @@ def train_loop(args, model, lossfun, train_loader, device):
                     optimizer.step()
 
                     if args.lr_decor > 0.0:
-                        decor_loss = decorrelation_update(decorrelators)
+                        decor_loss = decor_update(decorrelators)
                         decor_optimizer.step()
                         D[epoch] += decor_loss
 
