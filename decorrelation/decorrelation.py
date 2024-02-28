@@ -102,7 +102,10 @@ class Decorrelation(nn.Module):
         normalizer = 1.0 / (torch.mean(self.decor_state**2, axis=0))
         normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
 
-        self.weight.data = normalizer[:, None] * (torch.eye(corr.shape[0]) - self.eta * corr @ self.weight) @ self.weight.data
+        # self.weight.data = normalizer[:, None] * (torch.eye(corr.shape[0]) - self.eta * corr @ self.weight) @ self.weight.data
+
+        # OR BRING THIS IN OPTIMIZER FORM?
+        self.weight.data += self.eta * normalizer[:, None] * (torch.eye(corr.shape[0]) - corr @ self.weight) @ self.weight.data
 
         return 0.5 * torch.mean(torch.square(corr - torch.eye(corr.shape[0])))
 
