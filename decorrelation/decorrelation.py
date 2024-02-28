@@ -97,15 +97,38 @@ class Decorrelation(nn.Module):
             self.bias.grad = self.decor_state.sum(axis=0)
 
         # The full correlation matrix = (1/batch_size)*(x.T @ x)
-        corr = (1/len(self.decor_state))*(self.decor_state.transpose(0, 1) @ self.decor_state)
+        # corr = (1/len(self.decor_state))*(self.decor_state.transpose(0, 1) @ self.decor_state)
+
+        # normalizer = 1.0 / (torch.mean(self.decor_state**2, axis=0))
+        # normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
+
+        # # self.weight.data = normalizer[:, None] * (torch.eye(corr.shape[0]) - self.eta * corr @ self.weight) @ self.weight.data
+
+        # # OR BRING THIS IN OPTIMIZER FORM?
+        # self.weight.data += self.eta * normalizer[:, None] * (torch.eye(corr.shape[0]) - corr @ self.weight) @ self.weight.data
+
+        ## DOUBLE CHECK!
+
+        corr = (1/len(self.decor_state))*(
+            self.decor_state.transpose(0, 1) @ self.decor_state
+        )
+        grads = corr @ self.weight.data
 
         normalizer = 1.0 / (torch.mean(self.decor_state**2, axis=0))
         normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
+        # if self.decorrelation_method == "dgs-whiten":
+        #         normalizer = 1.0 / (torch.mean(self.decorrelated_state**2, axis=0))
+        #         normalizer[torch.mean(self.decorrelated_state**2, axis=0) < 1e-8] = 1.0
+        #     else:
+        #         normalizer = torch.mean(self.undecorrelated_state**2, axis=0) / (torch.mean(self.decorrelated_state**2, axis=0))
+        #         normalizer[torch.mean(self.decorrelated_state**2, axis=0) < 1e-8] = 1.0
 
-        # self.weight.data = normalizer[:, None] * (torch.eye(corr.shape[0]) - self.eta * corr @ self.weight) @ self.weight.data
+        grads *= normalizer[:, None]
 
-        # OR BRING THIS IN OPTIMIZER FORM?
-        self.weight.data += self.eta * normalizer[:, None] * (torch.eye(corr.shape[0]) - corr @ self.weight) @ self.weight.data
+        # Note that if we wish to use this with an SGD optimiser we have to be a little careful:
+        grads += (1 - normalizer)[:, None] * self.weight.data
+
+        self.weight.data -= self.eta * grads
 
         return 0.5 * torch.mean(torch.square(corr - torch.eye(corr.shape[0])))
 
