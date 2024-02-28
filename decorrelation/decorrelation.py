@@ -33,51 +33,70 @@ def lower_triangular(C: Tensor, offset: int):
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
-    def __init__(self, dim: int, kappa: float=0.0, device=None, dtype=None) -> None:
+    def __init__(self, in_features: int, bias: bool = False, device=None, dtype=None) -> None:
         """"Params:
             - dim: input dimensionality
-            - kappa: weighting between decorrelation (0.0) and unit variance (1.0)
         """
 
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
 
-        self.dim = dim
-        self.kappa = kappa
-        self.R = nn.Parameter(torch.eye(self.dim, **factory_kwargs), requires_grad=False)
+        self.in_features = in_features
+        self.weight = nn.Parameter(torch.empty(self.in_features, self.in_features, **factory_kwargs), requires_grad=False)
+        self.bias = nn.Parameter(torch.empty(in_features, **factory_kwargs), requires_grad=False) if bias else None
         self.X = None
 
-    def reset_parameters(self) -> None:
-        nn.init.eye(self.R)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
+        nn.init.eye_(self.weight)
     
-    def forward(self, input: Tensor) -> Tensor:
-        """Decorrelates the input. Maps back if needed. self.X is the decorrelated input. Stored here for updating in self.update().
-        For node perturbation we can decide to continuously update in the forward pass without separate update functions.
-        This cannot be done when combining with BP since we cannot change the computational graph before applying the backward pass.        
-        """
-        self.X = self.decorrelate(input)
-        return self.X.view(input.shape)
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        self.decor_state = F.linear(input, self.weight, self.bias)
+        return self.decor_state
 
     def decorrelate(self, input: Tensor):
         """Applies the decorrelating transform. Can be overloaded in composite functions to return the decorrelating transform 
         """
-        return F.linear(input.view(len(input), -1), self.R)
+        return F.linear(input.view(len(input), -1), self.weight)
 
-    def update(self):
-        """Implements learning rule in Decorrelation loss technical note"""
+    def update(self, eta):
+        """Implements whitened Gram-Schmidt decorrelation update"""
 
-        # strictly lower triangular part of x x' averaged over datapoints
-        L = torch.tril(self.X.T @ self.X, diagonal=-1) / len(self.X)
+        # # strictly lower triangular part of x x' averaged over datapoints
+        # L = torch.tril(self.X.T @ self.X, diagonal=-1) / len(self.X)
 
-        # unit variance term averaged over datapoints
-        V = torch.diag(torch.mean(torch.square(self.X), axis=0) - 1)
+        # # unit variance term averaged over datapoints
+        # V = torch.diag(torch.mean(torch.square(self.X), axis=0) - 1)
 
-        # compute update; equation (3) in technical note
-        self.R.grad = (4.0/self.dim) * ( ((1-self.kappa)/(self.dim - 1)) * L + self.kappa * V ) @ self.R
+        # # compute update; equation (3) in technical note
+        # self.weight.grad = (4.0/self.in_features) * ( ((1-self.kappa)/(self.in_features - 1)) * L + self.kappa * V ) @ self.weight
 
-        # compute loss; equation (1) in technical note
-        return (1.0/self.dim) * ( 2*(1-self.kappa)/(self.dim - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
+        # # compute loss; equation (1) in technical note
+        # return (1.0/self.in_features) * ( 2*(1-self.kappa)/(self.in_features - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
+
+        # If using a bias, it should demean the data
+        if self.bias is not None:
+            self.bias.grad = self.decor_state.sum(axis=0)
+
+        # The full correlation matrix = (1/batch_size)*(x.T @ x)
+        corr = (1/len(self.decor_state))*(self.decor_state.transpose(0, 1) @ self.decor_state)
+        grads = corr @ self.weight.data
+
+        normalizer = 1.0 / (torch.mean(self.decor_state**2, axis=0))
+        normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
+
+        grads *= normalizer[:, None]
+
+        # Note that if we wish to use this with an SGD optimiser we have to be a little careful:
+        grads += (1 - normalizer)[:, None] * self.weight
         
+        # Update grads of decorrelation matrix
+        self.weight.grad = grads
+
+        return 0.5 * torch.mean(torch.square(corr - torch.eye(corr.shape[0])))
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
@@ -102,7 +121,7 @@ class DecorConv2d(Decorrelation):
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(dim=in_channels * np.prod(kernel_size), kappa=kappa, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), kappa=kappa, **factory_kwargs)        
         self.downsample_perc = downsample_perc
 
         self.in_channels = in_channels
@@ -112,7 +131,7 @@ class DecorConv2d(Decorrelation):
         self.dilation = dilation
 
         # this applies the kernel weights
-        self.forward_conv = nn.Conv2d(in_channels=self.dim,
+        self.forward_conv = nn.Conv2d(in_channels=self.in_features,
                                         out_channels=out_channels,
                                         kernel_size=(1, 1),
                                         stride=(1, 1),
@@ -128,7 +147,7 @@ class DecorConv2d(Decorrelation):
         self.input = input
 
         # efficiently combines the patch-wise R update with the convolutional W update
-        weight = nn.functional.conv2d(self.R.view(self.dim, self.in_channels, *self.kernel_size).moveaxis(0, 1),
+        weight = nn.functional.conv2d(self.weight.view(self.in_features, self.in_channels, *self.kernel_size).moveaxis(0, 1),
                                       self.forward_conv.weight.flip(-1, -2),
                                       padding=0).moveaxis(0, 1)
                 
@@ -147,9 +166,9 @@ class DecorConv2d(Decorrelation):
     def decorrelate(self, input: Tensor):
         """Applies the decorrelating transform. Can be overloaded in composite functions to return the decorrelating transform 
         """
-        return nn.functional.conv2d(input, self.R.view(self.dim, self.in_channels, *self.kernel_size),
+        return nn.functional.conv2d(input, self.weight.view(self.in_features, self.in_channels, *self.kernel_size),
                                     bias=None, stride=self.stride, padding=self.padding, 
-                                    dilation=self.dilation).moveaxis(1, 3).reshape(-1, self.dim)
+                                    dilation=self.dilation).moveaxis(1, 3).reshape(-1, self.in_features)
         
     def update(self):
         self.X = self.decorrelate(self.input[np.random.choice(np.arange(len(self.input)),
