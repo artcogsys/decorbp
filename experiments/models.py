@@ -4,10 +4,15 @@ from decorrelation.decorrelation import DecorLinear, DecorConv2d
 class MLP(nn.Sequential):
     """Simple MLP example"""
 
-    def __init__(self, input_dim, kappa=0.0):
-        super().__init__(DecorLinear(input_dim, 100, kappa=kappa),
+    def __init__(self, in_features, eta):
+        """
+        Args:
+            in_features: int, number of inputs
+            eta: float, decorrelation learning rate
+        """
+        super().__init__(DecorLinear(in_features, 100, variance=1.0),
                         nn.ReLU(),
-                        DecorLinear(100, 10, kappa=kappa)
+                        DecorLinear(100, 10, variance=1.0)
                         )
 
     def forward(self, x):
@@ -16,12 +21,17 @@ class MLP(nn.Sequential):
 class ConvNet(nn.Sequential):
     """Simple ConvNet example"""
 
-    def __init__(self, in_channels, kappa=0.0):
+    def __init__(self, in_channels, eta):
+        """
+        Args:
+            in_channels: int, number of input channels
+            eta: float, decorrelation learning rate
+        """
 
-        super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), kappa=kappa),
+        super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), variance=1.0, downsample_perc=0.1),
                         nn.ReLU(),
                         nn.Flatten(),
-                        DecorLinear(2880, 10) # GENERAL DOWNSAMPLING
+                        DecorLinear(2880, 10, variance=1.0)
                         )
 
     def forward(self, x):

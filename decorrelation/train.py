@@ -10,7 +10,7 @@ def decor_train(args, model, lossfun, train_loader, device):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     decorrelators = decor_module(model)
-    decor_optimizer = torch.optim.SGD(decor_parameters(model), lr=args.lr_decor)
+    decor_optimizer = torch.optim.SGD(decor_parameters(model), lr=args.eta)
     
     L = np.zeros(args.epochs+1) # loss
     D = np.zeros(args.epochs+1) # decorrelation loss
