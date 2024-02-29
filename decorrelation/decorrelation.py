@@ -94,16 +94,6 @@ class Decorrelation(nn.Module):
             self.decor_state.transpose(0, 1) @ self.decor_state
         )
 
-        # objective =  normalizer[:, None] * (1 - corr) @ self.weight.data
-        # self.weight.grad = -(objective-self.weight.data)
-
-        # make suitable for gradient descent outside of function
-        # grads += (1 - normalizer)[:, None] * self.weight.data
-
-        # gradient descent step
-        # R <- R - eta * (R - (diag(N) - N X X')R)
-        # self.weight.data -= self.eta * grads
-
         # gradient of the error (-objective function)
         self.weight.grad = normalizer[:, None] * (corr @ self.weight.data) + (1 - normalizer)[:, None] * self.weight.data
 

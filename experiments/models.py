@@ -8,7 +8,7 @@ class MLP(nn.Sequential):
         """
         Args:
             in_features: int, number of inputs
-            eta: float, decorrelation learning rate
+            variance: diagonal variance
         """
         super().__init__(DecorLinear(in_features, 100, variance=variance),
                         nn.ReLU(),
@@ -26,7 +26,7 @@ class ConvNet(nn.Sequential):
         """
         Args:
             in_channels: int, number of input channels
-            eta: float, decorrelation learning rate
+            variance: diagonal variance
         """
 
         super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), variance=variance, downsample_perc=0.1),
