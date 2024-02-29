@@ -6,7 +6,7 @@ import numpy as np
 from torch.nn.common_types import _size_2_t
 import itertools
 
-def decor_module(model: nn.Module):
+def decor_modules(model: nn.Module):
     """Returns the list of decorrelation modules
     """
     return list(filter(lambda m: isinstance(m, Decorrelation), model.modules()))
@@ -14,7 +14,7 @@ def decor_module(model: nn.Module):
 def decor_parameters(model: nn.Module):
     """Returns all decorrelation parameters as an iterable
     """
-    return itertools.chain(*map( lambda m: m.decor_parameters(), decor_module(model)))
+    return itertools.chain(*map( lambda m: m.decor_parameters(), decor_modules(model)))
 
 def decor_update(modules):
     """Updates all decorrelation modules and returns decorrelation loss
@@ -67,17 +67,18 @@ class Decorrelation(nn.Module):
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         if self.uncorrelated:
-            self.variance =  torch.mean(input**2, axis=0)
-        self.decor_state = F.linear(input, self.weight, self.bias)
-        return self.decor_state
+            self.variance =  torch.mean(input.view(len(input), -1)**2, axis=0)
+        self.decor_state = F.linear(input.view(len(input), -1), self.weight, self.bias)
+        return self.decor_state.view(input.shape)
     
     # def __call__(self, input: Tensor) -> Tensor:
     #     return self.forward(input)
 
     def decorrelate(self, input: Tensor):
-        """Applies the decorrelating transform. Can be overloaded in composite functions to return the decorrelating transform 
+        """Applies the decorrelating transform. Can be overloaded in composite functions to return the decorrelating transform.
+        Maps back to the original input.
         """
-        return F.linear(input.view(len(input), -1), self.weight)
+        return F.linear(input.view(len(input), -1), self.weight, self.bias).view(input.shape)
 
     def update(self):
         """Implements whitened Gram-Schmidt decorrelation update"""
@@ -92,17 +93,19 @@ class Decorrelation(nn.Module):
         corr = (1/len(self.decor_state))*(
             self.decor_state.transpose(0, 1) @ self.decor_state
         )
-        grads = normalizer[:, None] * (corr @ self.weight.data)
 
-        # grads *= normalizer[:, None]
+        # objective =  normalizer[:, None] * (1 - corr) @ self.weight.data
+        # self.weight.grad = -(objective-self.weight.data)
 
         # make suitable for gradient descent outside of function
-        grads += (1 - normalizer)[:, None] * self.weight.data
+        # grads += (1 - normalizer)[:, None] * self.weight.data
 
         # gradient descent step
         # R <- R - eta * (R - (diag(N) - N X X')R)
         # self.weight.data -= self.eta * grads
-        self.weight.grad = grads
+
+        # gradient of the error (-objective function)
+        self.weight.grad = normalizer[:, None] * (corr @ self.weight.data) + (1 - normalizer)[:, None] * self.weight.data
 
         # return loss
         return torch.mean(torch.square(torch.tril(corr - torch.diag(self.variance), diagonal=0)))

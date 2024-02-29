@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from decorrelation.decorrelation import decor_parameters, decor_module, decor_update #, covariance
+from decorrelation.decorrelation import decor_parameters, decor_modules, decor_update #, covariance
 from time import time
 
 def decor_train(args, model, lossfun, train_loader, device):
@@ -9,7 +9,7 @@ def decor_train(args, model, lossfun, train_loader, device):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    decorrelators = decor_module(model)
+    decorrelators = decor_modules(model)
     decor_optimizer = torch.optim.SGD(decor_parameters(model), lr=args.eta)
     
     L = np.zeros(args.epochs+1) # loss
@@ -28,9 +28,9 @@ def decor_train(args, model, lossfun, train_loader, device):
 
             loss = lossfun(model(input), target)
 
-            # if epoch > 0:
-            #     loss.backward()
-            #     optimizer.step()
+            if epoch > 0:
+                loss.backward()
+                optimizer.step()
 
             decor_loss = decor_update(decorrelators)
 
@@ -38,7 +38,7 @@ def decor_train(args, model, lossfun, train_loader, device):
                 decor_optimizer.step()
 
             D[epoch] += decor_loss
-            L[epoch] += loss.item()
+            L[epoch] += loss
                      
         L[epoch] /= batchnum
 
