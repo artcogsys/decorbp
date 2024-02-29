@@ -50,7 +50,7 @@ class Decorrelation(nn.Module):
         self.X = None
         self.diagonal = diagonal
         if self.diagonal is None:
-            self.normalize = True
+            self.uncorrelated = True # compute uncorrelated diagonal
 
         self.reset_parameters()
 
@@ -60,7 +60,7 @@ class Decorrelation(nn.Module):
         nn.init.eye_(self.weight)
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        if self.normalize:
+        if self.uncorrelated:
             self.diagonal =  torch.mean(input, axis=0)
         self.decor_state = F.linear(input, self.weight, self.bias)
         return self.decor_state
@@ -99,12 +99,14 @@ class Decorrelation(nn.Module):
 
         grads *= normalizer[:, None]
 
-        # Note that if we wish to use this with an SGD optimiser we have to be a little careful:
+        # make suitable for gradient descent outside of function
         grads += (1 - normalizer)[:, None] * self.weight.data
 
+        # gradient descent step
         self.weight.data -= self.eta * grads
 
-        return 0.5 * torch.mean(torch.square(corr - torch.eye(corr.shape[0])))
+        # return loss
+        return torch.mean(torch.square(torch.tril(corr - self.diagonal @ torch.eye(corr.shape[0]), diagonal=0)))
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
