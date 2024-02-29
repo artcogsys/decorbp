@@ -8,7 +8,7 @@
             "name": "MNIST_MLP",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "experiments/main.py",
             "console": "integratedTerminal",
             "args": ["@experiments/config/MNIST_MLP.txt"]
         },
@@ -16,7 +16,7 @@
             "name": "MNIST_CONVNET",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "experiments/main.py",
             "console": "integratedTerminal",
             "args": ["@experiments/config/MNIST_CONVNET.txt"]
         }

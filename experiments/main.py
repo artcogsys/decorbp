@@ -18,7 +18,7 @@ def parse_arguments():
     parser.add_argument('--test_samples', default=-1, type=int, help="number of test samples (-1 = all)")
     parser.add_argument('--experiment', default='MNIST_MLP', type=str)
     parser.add_argument('--data_path', default='~/Data', type=str)
-    parser.add_argument('--eta', default=1e1, type=float, help="learning rate for decorrelation update") 
+    parser.add_argument('--eta', default=1e-4, type=float, help="learning rate for decorrelation update") 
     parser.add_argument('--variance', default=None, type=float)
     return parser.parse_args()
 
@@ -40,6 +40,6 @@ if __name__ == '__main__':
             print('Decorrelated BP:')
         else:
             print('Regular BP:')
-            args.lr_decor = 0.0
+            args.eta = 0.0
 
         res = decor_train(args, model, lossfun, train_loader, device)

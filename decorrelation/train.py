@@ -21,15 +21,16 @@ def decor_train(args, model, lossfun, train_loader, device):
         for batchnum, batch in enumerate(train_loader):
         
             optimizer.zero_grad()
+            decor_optimizer.zero_grad()
 
             input = batch[0].to(device)
             target = batch[1].to(device)
 
             loss = lossfun(model(input), target)
 
-            if epoch > 0:
-                loss.backward()
-                optimizer.step()
+            # if epoch > 0:
+            #     loss.backward()
+            #     optimizer.step()
 
             decor_loss = decor_update(decorrelators)
 
