@@ -33,11 +33,12 @@ def lower_triangular(C: Tensor, offset: int):
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
-    def __init__(self, in_features: int, bias: bool = False, eta: float = 1e-5, diagonal = None, device = None, dtype = None) -> None:
+    def __init__(self, in_features: int, bias: bool = False, eta: float = 1e-5, variance = None, device = None, dtype = None) -> None:
         """"Params:
             - in_features: input dimensionality
             - bias: whether or not to demean the data
             - eta: learning rate
+            - variance: variance constraint. If None, it is set to the input variances. if float it is set to a constant variance
         """
 
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -48,10 +49,12 @@ class Decorrelation(nn.Module):
         self.bias = nn.Parameter(torch.empty(in_features, **factory_kwargs), requires_grad=False) if bias else None
         self.eta = eta
         self.X = None
-        self.diagonal = diagonal
-        if self.diagonal is None:
-            self.uncorrelated = True # compute uncorrelated diagonal
-
+        self.uncorrelated = variance is None
+        if isinstance(variance, float):
+            self.variance = torch.tensor([variance] * in_features, **factory_kwargs)
+        else:
+            self.variance = variance
+                    
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -61,9 +64,12 @@ class Decorrelation(nn.Module):
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         if self.uncorrelated:
-            self.diagonal =  torch.mean(input, axis=0)
+            self.variance =  torch.mean(input**2, axis=0)
         self.decor_state = F.linear(input, self.weight, self.bias)
         return self.decor_state
+    
+    # def __call__(self, input: Tensor) -> Tensor:
+    #     return self.forward(input)
 
     def decorrelate(self, input: Tensor):
         """Applies the decorrelating transform. Can be overloaded in composite functions to return the decorrelating transform 
@@ -94,7 +100,7 @@ class Decorrelation(nn.Module):
         )
         grads = corr @ self.weight.data
 
-        normalizer = self.diagonal / (torch.mean(self.decor_state**2, axis=0))
+        normalizer = self.variance / (torch.mean(self.decor_state**2, axis=0))
         normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
 
         grads *= normalizer[:, None]
@@ -103,18 +109,20 @@ class Decorrelation(nn.Module):
         grads += (1 - normalizer)[:, None] * self.weight.data
 
         # gradient descent step
+        # R <- R - eta * (R - (diag(N) - N X X')R)
         self.weight.data -= self.eta * grads
 
         # return loss
-        return torch.mean(torch.square(torch.tril(corr - self.diagonal @ torch.eye(corr.shape[0]), diagonal=0)))
+        return torch.mean(torch.square(torch.tril(corr - torch.diag(self.variance), diagonal=0)))
+
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, kappa: float = 0.0, 
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, eta: float = 1e-5, variance = None, 
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__(in_features, kappa=kappa, **factory_kwargs)
+        super().__init__(in_features, eta=eta, variance=variance, **factory_kwargs)
         self.linear = nn.Linear(in_features, out_features, bias=bias, **factory_kwargs)
         
     def forward(self, input: Tensor) -> Tensor:
@@ -126,13 +134,13 @@ class DecorConv2d(Decorrelation):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
-                 bias: bool = False, eta: float = 1e-5, downsample_perc=1.0,
+                 bias: bool = False, eta: float = 1e-5, variance = None, downsample_perc=1.0,
                  device=None, dtype=None) -> None:
 
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(in_features=in_channels * np.prod(kernel_size), eta=eta, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), eta=eta, variance=variance, **factory_kwargs)        
         self.downsample_perc = downsample_perc
 
         self.in_channels = in_channels
@@ -155,9 +163,13 @@ class DecorConv2d(Decorrelation):
 
     def forward(self, input: Tensor) -> Tensor:
 
-        self.input = input
+        # we store a downsampled version for input decorrelation and diagonal computation
+        idx = np.random.choice(np.arange(len(input)), size= int(len(input) * self.downsample_perc)) # could work better on downsampled patches instead
+        self.decor_state = self.decorrelate(input[idx])
+        if self.uncorrelated:
+            self.variance =  torch.mean(self.patches(input[idx])**2, axis=0)
 
-        # efficiently combines the patch-wise R update with the convolutional W update
+        # efficiently combines the patch-wise R update with the convolutional W update on all data
         weight = nn.functional.conv2d(self.weight.view(self.in_features, self.in_channels, *self.kernel_size).moveaxis(0, 1),
                                       self.forward_conv.weight.flip(-1, -2),
                                       padding=0).moveaxis(0, 1)
@@ -181,7 +193,11 @@ class DecorConv2d(Decorrelation):
                                     bias=None, stride=self.stride, padding=self.padding, 
                                     dilation=self.dilation).moveaxis(1, 3).reshape(-1, self.in_features)
         
-    def update(self):
-        self.decor_state = self.decorrelate(self.input[np.random.choice(np.arange(len(self.input)),
-                                                      size= int(len(self.input) * self.downsample_perc))])
-        return super().update()
+    def patches(self, input: Tensor):
+        """Returns the input patches via an identity mapping"""
+        identity = nn.Parameter(torch.empty(self.in_features, self.in_features, device=self.weight.device, dtype=self.weight.dtype), requires_grad=False)
+        nn.init.eye_(identity)
+        return nn.functional.conv2d(input, identity.view(self.in_features, self.in_channels, *self.kernel_size),
+                                    bias=None, stride=self.stride, padding=self.padding, 
+                                    dilation=self.dilation).moveaxis(1, 3).reshape(-1, self.in_features)
+
