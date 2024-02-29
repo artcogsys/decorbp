@@ -80,7 +80,7 @@ class Decorrelation(nn.Module):
         """
         return F.linear(input.view(len(input), -1), self.weight, self.bias).view(input.shape)
 
-    def update(self):
+    def update(self): 
         """Implements whitened Gram-Schmidt decorrelation update"""
 
         # If using a bias, it should demean the data
