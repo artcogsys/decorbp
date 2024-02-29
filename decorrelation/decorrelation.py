@@ -33,7 +33,7 @@ def lower_triangular(C: Tensor, offset: int):
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
-    def __init__(self, in_features: int, bias: bool = False, eta: float = 1e-5, device=None, dtype=None) -> None:
+    def __init__(self, in_features: int, bias: bool = False, eta: float = 1e-5, diagonal = None, device = None, dtype = None) -> None:
         """"Params:
             - in_features: input dimensionality
             - bias: whether or not to demean the data
@@ -48,6 +48,9 @@ class Decorrelation(nn.Module):
         self.bias = nn.Parameter(torch.empty(in_features, **factory_kwargs), requires_grad=False) if bias else None
         self.eta = eta
         self.X = None
+        self.diagonal = diagonal
+        if self.diagonal is None:
+            self.normalize = True
 
         self.reset_parameters()
 
@@ -57,6 +60,8 @@ class Decorrelation(nn.Module):
         nn.init.eye_(self.weight)
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self.normalize:
+            self.diagonal =  torch.mean(input, axis=0)
         self.decor_state = F.linear(input, self.weight, self.bias)
         return self.decor_state
 
@@ -80,48 +85,17 @@ class Decorrelation(nn.Module):
         # # compute loss; equation (1) in technical note
         # return (1.0/self.in_features) * ( 2*(1-self.kappa)/(self.in_features - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
 
-        # update *= normalizer[:, None]
-
-        # # Note that if we wish to use this with an SGD optimiser we have to be a little careful:
-        # update += (1 - normalizer)[:, None] * self.weight
-        
-        # self.weight.data = update @ self.weight.data
-
-        # Update grads of decorrelation matrix
-        # self.weight.grad = grads
-
-        # self.weight -= eta * self.weight.grad
-
         # If using a bias, it should demean the data
         if self.bias is not None:
             self.bias.grad = self.decor_state.sum(axis=0)
-
-        # The full correlation matrix = (1/batch_size)*(x.T @ x)
-        # corr = (1/len(self.decor_state))*(self.decor_state.transpose(0, 1) @ self.decor_state)
-
-        # normalizer = 1.0 / (torch.mean(self.decor_state**2, axis=0))
-        # normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
-
-        # # self.weight.data = normalizer[:, None] * (torch.eye(corr.shape[0]) - self.eta * corr @ self.weight) @ self.weight.data
-
-        # # OR BRING THIS IN OPTIMIZER FORM?
-        # self.weight.data += self.eta * normalizer[:, None] * (torch.eye(corr.shape[0]) - corr @ self.weight) @ self.weight.data
-
-        ## DOUBLE CHECK!
 
         corr = (1/len(self.decor_state))*(
             self.decor_state.transpose(0, 1) @ self.decor_state
         )
         grads = corr @ self.weight.data
 
-        normalizer = 1.0 / (torch.mean(self.decor_state**2, axis=0))
+        normalizer = self.diagonal / (torch.mean(self.decor_state**2, axis=0))
         normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
-        # if self.decorrelation_method == "dgs-whiten":
-        #         normalizer = 1.0 / (torch.mean(self.decorrelated_state**2, axis=0))
-        #         normalizer[torch.mean(self.decorrelated_state**2, axis=0) < 1e-8] = 1.0
-        #     else:
-        #         normalizer = torch.mean(self.undecorrelated_state**2, axis=0) / (torch.mean(self.decorrelated_state**2, axis=0))
-        #         normalizer[torch.mean(self.decorrelated_state**2, axis=0) < 1e-8] = 1.0
 
         grads *= normalizer[:, None]
 
