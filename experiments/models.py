@@ -11,7 +11,7 @@ class MLP(nn.Sequential):
             variance: diagonal variance
         """
         super().__init__(DecorLinear(in_features, 100, variance=variance),
-                        nn.ReLU(),
+                        nn.LeakyReLU(),
                         DecorLinear(100, 10, variance=variance)
                         )
 
@@ -30,7 +30,7 @@ class ConvNet(nn.Sequential):
         """
 
         super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), variance=variance, downsample_perc=0.1),
-                        nn.ReLU(),
+                        nn.LeakyReLU(),
                         nn.Flatten(),
                         DecorLinear(2880, 10, variance=variance)
                         )

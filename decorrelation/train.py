@@ -33,7 +33,6 @@ def decor_train(args, model, lossfun, train_loader, device):
                 optimizer.step()
 
             decor_loss = decor_update(decorrelators)
-
             if epoch > 0:
                 decor_optimizer.step()
 

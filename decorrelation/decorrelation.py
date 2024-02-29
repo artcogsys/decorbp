@@ -98,7 +98,8 @@ class Decorrelation(nn.Module):
         self.weight.grad = normalizer[:, None] * (corr @ self.weight.data) + (1 - normalizer)[:, None] * self.weight.data
 
         # return loss
-        return torch.mean(torch.square(torch.tril(corr - torch.diag(self.variance), diagonal=0)))
+        # return torch.mean(torch.square(torch.tril(corr - torch.diag(self.variance), diagonal=0)))
+        return torch.mean(torch.square(corr - torch.diag(self.variance)))
 
 
 class DecorLinear(Decorrelation):
