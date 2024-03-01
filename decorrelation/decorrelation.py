@@ -93,7 +93,7 @@ class Decorrelation(nn.Module):
 
         # If using a bias, it should demean the data
         if self.bias is not None:
-            self.bias.grad = self.decor_state.sum(axis=0) # NOTE: OR MEAN?? IS IT UPDATED?
+            self.bias.grad = self.decor_state.mean(axis=0) # NOTE: replaced sum with mean
 
         # normalizer for the decorrelation update
         if self.variance is None:
@@ -112,7 +112,7 @@ class Decorrelation(nn.Module):
         # set gradient
         self.weight.grad = self.weight - update
 
-        # return loss; NOTE: why would we count the off-diagonal elements twice?
+        # return loss
         # return torch.mean(torch.square(torch.tril(corr - torch.diag(self.variance), diagonal=0)))
         if self.variance is None:
             return torch.mean(torch.square(corr))
@@ -122,10 +122,10 @@ class Decorrelation(nn.Module):
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, eta = 1.0, variance = None, 
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, decor_bias=False, eta = 1.0, variance = None, 
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__(in_features, eta=eta, variance=variance, **factory_kwargs)
+        super().__init__(in_features, bias=decor_bias, eta=eta, variance=variance, **factory_kwargs)
         self.linear = nn.Linear(in_features, out_features, bias=bias, **factory_kwargs)
         
     def forward(self, input: Tensor) -> Tensor:
@@ -137,13 +137,13 @@ class DecorConv2d(Decorrelation):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
-                 bias: bool = False, eta = 1.0, variance = None, downsample_perc=1.0,
+                 bias: bool = True, decor_bias: bool = False, eta = 1.0, variance = None, downsample_perc=1.0,
                  device=None, dtype=None) -> None:
 
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(in_features=in_channels * np.prod(kernel_size), eta=eta, variance=variance, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), bias=decor_bias, eta=eta, variance=variance, **factory_kwargs)        
         self.downsample_perc = downsample_perc
 
         self.in_channels = in_channels

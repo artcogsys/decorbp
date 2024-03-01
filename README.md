@@ -32,7 +32,7 @@ where $\epsilon > 0$ controls the step size and $\eta > 0$ controls how much we 
 
 [This notebook](examples/decorrelation_analysis.ipynb) shows that this indeed works as expected.
 
-recommendation: If we use the full instead of batched data then we can use the first variant since the normalizer does not change in each batch. In batched mode we should use the alternative where we only nudge in the direction of a certain variance.
+If we use the full instead of batched data then we can use the first variant since the normalizer does not change in each batch. In batched mode we should use the alternative where we only nudge in the direction of a certain variance.
 
 I also added the option to ignore the normalizer (```variance=None```), in which case both options coincide.
 
@@ -46,7 +46,9 @@ R \leftarrow R - \alpha \left[ \kappa (I - N) + (1-\kappa) N C \right] R
 $$
 so we can more explicitly trade off variance normalization and decorrelation.
 
-We are still experiencing issues with multiple layers which is related to the variance constraint. See [this notebook](examples/train_analysis.ipynb). May also have to do with MNIST issues (zeros/scaling) and demeaning.
+### Issues
+
+We are still experiencing issues with multiple layers which is related to the variance constraint. See [this notebook](examples/train_analysis.ipynb) (last example when choosing variance=1.0) as well as the experiments folder. May also have to do with MNIST issues (zeros/scaling) and demeaning.
 
 ### Bias
 
@@ -58,6 +60,4 @@ How many samples needed for proper estimation? dimensionality dependent but can 
 
 ### Triangular part
 
-Should check the theory first but still wondering about how we handle full vs triangular part and its tradeoffs.
-
-
+Should check the theory first but still wondering about how we handle full vs triangular part and its tradeoffs. I also want to check against the old (updated) learning rule.
