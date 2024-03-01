@@ -85,22 +85,20 @@ class Decorrelation(nn.Module):
 
         # If using a bias, it should demean the data
         if self.bias is not None:
-            self.bias.grad = self.decor_state.sum(axis=0)
+            self.bias.grad = self.decor_state.sum(axis=0) # NOTE: OR MEAN?? IS IT UPDATED?
 
         normalizer = self.variance / (torch.mean(self.decor_state**2, axis=0))
         normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
 
-        corr = (1/len(self.decor_state))*(
-            self.decor_state.transpose(0, 1) @ self.decor_state
-        )
+        # compute the correlation matrix
+        corr = (self.decor_state.T @ self.decor_state) / len(self.decor_state)
 
         # gradient of the error (-objective function)
         self.weight.grad = normalizer[:, None] * (corr @ self.weight.data) + (1 - normalizer)[:, None] * self.weight.data
 
-        # return loss
+        # return loss; NOTE: why would we count the off-diagonal elements twice?
         # return torch.mean(torch.square(torch.tril(corr - torch.diag(self.variance), diagonal=0)))
         return torch.mean(torch.square(corr - torch.diag(self.variance)))
-
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
