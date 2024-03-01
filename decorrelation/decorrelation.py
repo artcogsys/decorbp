@@ -94,7 +94,9 @@ class Decorrelation(nn.Module):
         corr = (self.decor_state.T @ self.decor_state) / len(self.decor_state)
 
         # gradient of the error (-objective function)
-        self.weight.grad = - (normalizer[:, None] * self.weight - normalizer[:, None] * corr @ self.weight)
+        # self.weight.grad = - (normalizer[:, None] * self.weight - normalizer[:, None] * corr @ self.weight)
+
+        # self.weight.data = normalizer[:, None] * self.weight - 1e-5 * normalizer[:, None] * corr @ self.weight
 
         # return loss; NOTE: why would we count the off-diagonal elements twice?
         # return torch.mean(torch.square(torch.tril(corr - torch.diag(self.variance), diagonal=0)))
