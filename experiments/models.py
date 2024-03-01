@@ -4,15 +4,16 @@ from decorrelation.decorrelation import DecorLinear, DecorConv2d
 class MLP(nn.Sequential):
     """Simple MLP example"""
 
-    def __init__(self, in_features, variance):
+    def __init__(self, in_features, eta, variance):
         """
         Args:
             in_features: int, number of inputs
+            eta: decorrelation strength
             variance: diagonal variance
         """
-        super().__init__(DecorLinear(in_features, 100, variance=variance),
+        super().__init__(DecorLinear(in_features, 100, eta=eta, variance=variance),
                         nn.LeakyReLU(),
-                        DecorLinear(100, 10, variance=variance)
+                        DecorLinear(100, 10, eta=eta, variance=variance)
                         )
 
     def forward(self, x):
@@ -22,17 +23,18 @@ class MLP(nn.Sequential):
 class ConvNet(nn.Sequential):
     """Simple ConvNet example"""
 
-    def __init__(self, in_channels, variance):
+    def __init__(self, in_channels, eta, variance):
         """
         Args:
             in_channels: int, number of input channels
+            eta: decorrelation strength
             variance: diagonal variance
         """
 
-        super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), variance=variance, downsample_perc=0.1),
+        super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), eta=eta, variance=variance, downsample_perc=0.1),
                         nn.LeakyReLU(),
                         nn.Flatten(),
-                        DecorLinear(2880, 10, variance=variance)
+                        DecorLinear(2880, 10, eta=eta, variance=variance)
                         )
 
     def forward(self, x):

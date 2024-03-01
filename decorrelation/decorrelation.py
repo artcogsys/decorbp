@@ -112,12 +112,6 @@ class Decorrelation(nn.Module):
         # set gradient
         self.weight.grad = self.weight - update
 
-        # gradient of the error (-objective function)
-        # self.weight.grad = - (normalizer * self.weight - normalizer * corr @ self.weight)
-
-        # this would be the direct update rule
-        # self.weight.data = normalizer * (torch.eye(self.in_features) - 1e-5 * corr) @ self.weight
-
         # return loss; NOTE: why would we count the off-diagonal elements twice?
         # return torch.mean(torch.square(torch.tril(corr - torch.diag(self.variance), diagonal=0)))
         if self.variance is None:
@@ -128,10 +122,10 @@ class Decorrelation(nn.Module):
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, variance = None, 
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, eta = 1.0, variance = None, 
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__(in_features, variance=variance, **factory_kwargs)
+        super().__init__(in_features, eta=eta, variance=variance, **factory_kwargs)
         self.linear = nn.Linear(in_features, out_features, bias=bias, **factory_kwargs)
         
     def forward(self, input: Tensor) -> Tensor:
@@ -143,13 +137,13 @@ class DecorConv2d(Decorrelation):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
-                 bias: bool = False, variance = None, downsample_perc=1.0,
+                 bias: bool = False, eta = 1.0, variance = None, downsample_perc=1.0,
                  device=None, dtype=None) -> None:
 
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(in_features=in_channels * np.prod(kernel_size), variance=variance, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), eta=eta, variance=variance, **factory_kwargs)        
         self.downsample_perc = downsample_perc
 
         self.in_channels = in_channels
@@ -175,7 +169,7 @@ class DecorConv2d(Decorrelation):
         # we store a downsampled version for input decorrelation and diagonal computation
         idx = np.random.choice(np.arange(len(input)), size= int(len(input) * self.downsample_perc)) # could work better on downsampled patches instead
         self.decor_state = self.decorrelate(input[idx])
-        if self.uncorrelated:
+        if self.input_variance:
             self.variance =  torch.mean(self.patches(input[idx])**2, axis=0)
 
         # efficiently combines the patch-wise R update with the convolutional W update on all data

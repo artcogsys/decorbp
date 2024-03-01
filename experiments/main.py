@@ -10,7 +10,6 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--num_workers', default=0, type=int)
@@ -18,7 +17,9 @@ def parse_arguments():
     parser.add_argument('--test_samples', default=-1, type=int, help="number of test samples (-1 = all)")
     parser.add_argument('--experiment', default='MNIST_MLP', type=str)
     parser.add_argument('--data_path', default='~/Data', type=str)
-    parser.add_argument('--eta', default=1e-4, type=float, help="learning rate for decorrelation update") 
+    parser.add_argument('--lr', default=1e-3, type=float)
+    parser.add_argument('--decor_lr', default=1e-4, type=float)
+    parser.add_argument('--eta', default=1.0, type=float, help="learning rate for decorrelation update") 
     parser.add_argument('--variance', default=None, type=float)
     return parser.parse_args()
 
