@@ -50,6 +50,14 @@ so we can more explicitly trade off variance normalization and decorrelation.
 
 We are still experiencing issues with multiple layers which is related to the variance constraint. See [this notebook](examples/train_analysis.ipynb) (last example when choosing variance=1.0) as well as the experiments folder. May also have to do with MNIST issues (zeros/scaling) and demeaning.
 
+### Solution
+
+Note that just using
+$$
+R \leftarrow R - \eta N C R
+$$
+with $\eta$ the SGD learning rate converges to the correct solution.
+
 ### Bias
 
 Demeaning using bias needs to more testing. I replaced ```sum``` with ```mean```.

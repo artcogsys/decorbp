@@ -111,6 +111,7 @@ class Decorrelation(nn.Module):
 
         # set gradient
         self.weight.grad = self.weight - update
+        # self.weight.grad = self.eta * normalizer * corr @ self.weight
 
         # return loss
         # return torch.mean(torch.square(torch.tril(corr - torch.diag(self.variance), diagonal=0)))
