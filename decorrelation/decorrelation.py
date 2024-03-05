@@ -32,7 +32,8 @@ def lower_triangular(C: Tensor, offset: int):
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
-    def __init__(self, in_features: int, bias: bool = False, eta = 1.0, variance = None, device = None, dtype = None) -> None:
+    def __init__(self, in_features: int, bias: bool = False,
+                 eta = 1.0, variance = None, device = None, dtype = None) -> None:
         """"Params:
             - in_features: input dimensionality
             - bias: whether or not to demean the data

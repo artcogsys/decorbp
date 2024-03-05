@@ -1,4 +1,6 @@
-This repository implements the updated decorrelation approach
+This repository implements decorrelated and whitened backpropagation.
+
+
 
 ## NOTES
 
