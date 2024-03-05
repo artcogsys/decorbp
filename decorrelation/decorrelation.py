@@ -29,7 +29,6 @@ def lower_triangular(C: Tensor, offset: int):
     """
     return C[torch.tril_indices(C.shape[0], C.shape[1], offset=offset).unbind()]
 
-
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
