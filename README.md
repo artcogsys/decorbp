@@ -1,5 +1,12 @@
 This repository implements decorrelated and whitened backpropagation.
 
+## DEBUG
+
+- Gaat bias goed?
+- apart batchnorm?
+- MNIST issues?
+- groeien de weights te snel? weight decay?
+
 
 
 ## NOTES

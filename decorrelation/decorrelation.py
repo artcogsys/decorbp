@@ -32,34 +32,28 @@ def lower_triangular(C: Tensor, offset: int):
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
-    def __init__(self, in_features: int, bias: bool = False,
-                 eta = 1.0, variance = None, device = None, dtype = None) -> None:
+    def __init__(self, in_features: int, bias: bool = False, method: str = 'copi', whiten: bool = True, 
+                 eta: float = 1.0, device = None, dtype = None) -> None:
         """"Params:
             - in_features: input dimensionality
             - bias: whether or not to demean the data
+            - whiten: whether or not to whiten the data
+            - method: decorrelation method: 'copi' or 'gs' (gram-schmidt)
             - eta: decorrelation step size (eta = 0: variance constraint only; eta > 0: pushes towards normalized decorrelation)
-            - variance: variance constraint:
-                - None: no variance constraint
-                - float: constant variance
-                - tensor: per-feature variance
-                - 'input': use input variance
         """
 
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
 
         self.in_features = in_features
-        self.weight = nn.Parameter(torch.empty(self.in_features, self.in_features, **factory_kwargs), requires_grad=False)
-        self.bias = nn.Parameter(torch.empty(in_features, **factory_kwargs), requires_grad=False) if bias else None
+        self.register_buffer("weight", torch.empty(self.in_features, self.in_features, **factory_kwargs))
+        if bias:           
+            self.register_buffer("bias", torch.empty(in_features, **factory_kwargs))
+        else:
+            self.bias = None
+        self.whiten = whiten
         self.eta = eta
 
-        self.input_variance = (variance == 'input')
-        self.variance = None       
-        if isinstance(variance, float):
-            self.variance = torch.tensor([variance] * in_features, **factory_kwargs)
-        else:
-            self.variance = variance
-                    
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -74,8 +68,6 @@ class Decorrelation(nn.Module):
             return [self.weight]
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        if self.input_variance:
-            self.variance =  torch.mean(input.view(len(input), -1)**2, axis=0)
         self.decor_state = F.linear(input.view(len(input), -1), self.weight, self.bias)
         return self.decor_state.view(input.shape)
     
@@ -88,44 +80,35 @@ class Decorrelation(nn.Module):
         """
         return F.linear(input.view(len(input), -1), self.weight, self.bias).view(input.shape)
 
-    def update(self): 
+    def update(self):
         """Implements Gram-Schmidt decorrelation update"""
 
         # If using a bias, it should demean the data
         if self.bias is not None:
             self.bias.grad = self.decor_state.mean(axis=0) # NOTE: replaced sum with mean
 
-        # normalizer for the decorrelation update
-        if self.variance is None:
-            normalizer = 1.0
-        else:
-            normalizer = self.variance / (torch.mean(self.decor_state**2, axis=0))
-            normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
-            normalizer = normalizer[:, None]
-            
         # compute the correlation matrix
         corr = (self.decor_state.T @ self.decor_state) / len(self.decor_state)
 
-        # compute the update
-        update = normalizer * (torch.eye(self.in_features) - self.eta * corr) @ self.weight
-
-        # set gradient
-        self.weight.grad = self.weight - update
-        # self.weight.grad = self.eta * normalizer * corr @ self.weight
-
-        # return loss
-        if self.variance is None:
-            return torch.mean(torch.square(corr))
-        else:            
-            return torch.mean(torch.square(corr - torch.diag(self.variance)))
+        # normalizer for the decorrelation update
+        if self.whiten:            
+            normalizer = 1.0 / (torch.mean(self.decor_state**2, axis=0))
+            normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
+            update = normalizer[:, None] * (self.weight -  self.eta * corr @ self.weight)
+            self.weight.grad = self.weight - update
+            return torch.mean(torch.square(lower_triangular(corr, offset=-1)))
+    
+        else:
+            self.weight.grad = corr @ self.weight.data
+            return torch.mean(torch.square(lower_triangular(corr, offset=-1)))
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, decor_bias=False, eta = 1.0, variance = None, 
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, decor_bias=False, eta = 1.0, whiten = True, 
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__(in_features, bias=decor_bias, eta=eta, variance=variance, **factory_kwargs)
+        super().__init__(in_features, bias=decor_bias, eta=eta, whiten=whiten, **factory_kwargs)
         self.linear = nn.Linear(in_features, out_features, bias=bias, **factory_kwargs)
         
     def forward(self, input: Tensor) -> Tensor:
@@ -137,13 +120,13 @@ class DecorConv2d(Decorrelation):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
-                 bias: bool = True, decor_bias: bool = False, eta = 1.0, variance = None, downsample_perc=1.0,
+                 bias: bool = True, decor_bias: bool = False, eta = 1.0, whiten = True, downsample_perc=1.0,
                  device=None, dtype=None) -> None:
 
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(in_features=in_channels * np.prod(kernel_size), bias=decor_bias, eta=eta, variance=variance, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), bias=decor_bias, eta=eta, whiten=whiten, **factory_kwargs)        
         self.downsample_perc = downsample_perc
 
         self.in_channels = in_channels
@@ -169,8 +152,6 @@ class DecorConv2d(Decorrelation):
         # we store a downsampled version for input decorrelation and diagonal computation
         idx = np.random.choice(np.arange(len(input)), size= int(len(input) * self.downsample_perc)) # could work better on downsampled patches instead
         self.decor_state = self.decorrelate(input[idx])
-        if self.input_variance:
-            self.variance =  torch.mean(self.patches(input[idx])**2, axis=0)
 
         # efficiently combines the patch-wise R update with the convolutional W update on all data
         weight = nn.functional.conv2d(self.weight.view(self.in_features, self.in_channels, *self.kernel_size).moveaxis(0, 1),

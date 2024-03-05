@@ -7,7 +7,7 @@ def decor_train(args, model, lossfun, train_loader, device):
     """Train using decorrelated backpropagation. Can also be used to run regular bp with args.decor_lr = 0.0. But for fair comparison see bp_train.
     """
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) if args.lr > 0.0 else None
 
     decorrelators = decor_modules(model)
     decor_optimizer = torch.optim.SGD(decor_parameters(model), lr=args.decor_lr)
@@ -20,7 +20,7 @@ def decor_train(args, model, lossfun, train_loader, device):
         tic = time()
         for batchnum, batch in enumerate(train_loader):
         
-            optimizer.zero_grad()
+            optimizer.zero_grad() if args.lr > 0.0 else None
             decor_optimizer.zero_grad()
 
             input = batch[0].to(device)
@@ -28,7 +28,7 @@ def decor_train(args, model, lossfun, train_loader, device):
 
             loss = lossfun(model(input), target)
 
-            if epoch > 0:
+            if epoch > 0 and args.lr > 0.0:
                 loss.backward()
                 optimizer.step()
 
