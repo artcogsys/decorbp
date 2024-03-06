@@ -11,9 +11,9 @@ class MLP(nn.Sequential):
             eta: decorrelation strength
             variance: diagonal variance
         """
-        super().__init__(DecorLinear(in_features, 100, eta=eta, variance=variance),
+        super().__init__(DecorLinear(in_features, 100, kappa=eta, variance=variance),
                         nn.LeakyReLU(),
-                        DecorLinear(100, 10, eta=eta, variance=variance)
+                        DecorLinear(100, 10, kappa=eta, variance=variance)
                         )
 
     def forward(self, x):
@@ -31,10 +31,10 @@ class ConvNet(nn.Sequential):
             variance: diagonal variance
         """
 
-        super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), eta=eta, variance=variance, downsample_perc=0.1),
+        super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), kappa=eta, variance=variance, downsample_perc=0.1),
                         nn.LeakyReLU(),
                         nn.Flatten(),
-                        DecorLinear(2880, 10, eta=eta, variance=variance)
+                        DecorLinear(2880, 10, kappa=eta, variance=variance)
                         )
 
     def forward(self, x):

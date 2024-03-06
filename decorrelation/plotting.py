@@ -63,7 +63,7 @@ def plot_correlations(init_model, model, dataloader, device):
     modules = decor_modules(model)
     num_mods = len(list(modules))
 
-    fig, ax = plt.subplots(2, num_mods, figsize=(14, 9))
+    fig, ax = plt.subplots(2, num_mods, figsize=(4*num_mods, 9))
     for batch in dataloader:
         init_model.forward(batch[0].to(device))
         model.forward(batch[0].to(device))
@@ -77,8 +77,8 @@ def plot_correlations(init_model, model, dataloader, device):
             C = (state.T @ state) / len(state)
             C = C.detach()
 
-            covariance_histogram(ax[0,i], Ci, C)
-            variance_histogram(ax[1,i], Ci, C)
+            covariance_histogram(ax[0,i] if num_mods > 1 else ax[0], Ci, C)
+            variance_histogram(ax[1,i]  if num_mods > 1 else ax[1], Ci, C)
 
             print(f'layer {i+1}:\n')
             print(f'mean covariance before decorrelation: {torch.mean(lower_triangular(Ci, offset=-1)):.2f}')
@@ -87,5 +87,5 @@ def plot_correlations(init_model, model, dataloader, device):
             print(f'mean variance after decorrelation: {torch.mean(torch.diagonal(C)):.2f}\n')
 
         break
-
-    ax[0,-1].legend(['correlated', 'decorrelated']);
+    
+    ax[0,-1].legend(['correlated', 'decorrelated']) if num_mods > 1 else ax[-1].legend(['correlated', 'decorrelated'])
