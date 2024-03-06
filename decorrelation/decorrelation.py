@@ -84,7 +84,7 @@ class Decorrelation(nn.Module):
 
         # If using a bias, it should demean the data
         if self.bias is not None:
-            self.bias.grad = self.decor_state.mean(axis=0)
+            self.bias.grad = 1e-3 * self.decor_state.mean(axis=0)
 
         # strictly lower triangular part of x x' averaged over datapoints
         L = torch.tril(self.decor_state.T @ self.decor_state) / len(self.decor_state)

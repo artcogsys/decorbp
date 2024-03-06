@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import argparse
 from experiments import get_experiment
-from decorrelation.training import decor_train
+from decorrelation.training import decor_train, bp_train
 
 def parse_arguments():
 
@@ -19,8 +19,7 @@ def parse_arguments():
     parser.add_argument('--data_path', default='~/Data', type=str)
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--decor_lr', default=1e-4, type=float)
-    parser.add_argument('--eta', default=1.0, type=float, help="learning rate for decorrelation update") 
-    parser.add_argument('--variance', default=None, type=float)
+    parser.add_argument('--kappa', default=1e-3, type=float, help="strenght of unit variance constraint [0-1]") 
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -39,8 +38,9 @@ if __name__ == '__main__':
 
         if i == 0:
             print('Decorrelated BP:')
+            res = decor_train(args, model, lossfun, train_loader, device)
         else:
             print('Regular BP:')
-            args.eta = 0.0
+            res = bp_train(args, model, lossfun, train_loader, device)
 
-        res = decor_train(args, model, lossfun, train_loader, device)
+    

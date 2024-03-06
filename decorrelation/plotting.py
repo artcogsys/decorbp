@@ -21,7 +21,7 @@ def covariance_histogram(ax, *Cs, labels=None):
     """Plot covariance of one or more covariance matrices
     """
 
-    covs = [lower_triangular(C, offset=0) for C in Cs]
+    covs = [lower_triangular(C, offset=-1) for C in Cs]
     ax.hist(covs, bins=30, density=True)
     ax.set_xlabel('$x_i x_j$')
     ax.set_title('covariance')
