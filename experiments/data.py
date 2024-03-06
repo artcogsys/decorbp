@@ -9,7 +9,7 @@ def get_MNIST(args):
     transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Grayscale(1),
-            transforms.Normalize((0.5), (0.25))
+            transforms.Normalize((0.5), (0.5))
             ])
 
     if args.train_samples == 0:

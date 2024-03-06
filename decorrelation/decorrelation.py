@@ -52,7 +52,9 @@ class Decorrelation(nn.Module):
         else:
             self.bias = None
         self.whiten = whiten
-        self.eta = eta
+
+        # temporary!
+        self.kappa = eta
 
         self.reset_parameters()
 
@@ -85,22 +87,22 @@ class Decorrelation(nn.Module):
 
         # If using a bias, it should demean the data
         if self.bias is not None:
-            self.bias.grad = self.decor_state.mean(axis=0) # NOTE: replaced sum with mean
+            self.bias.grad = self.decor_state.mean(axis=0)
 
-        # compute the correlation matrix
-        corr = (self.decor_state.T @ self.decor_state) / len(self.decor_state)
+        # strictly lower triangular part of x x' averaged over datapoints
+        L = torch.tril(self.decor_state.T @ self.decor_state) / len(self.decor_state)
+        # L = self.decor_state.T @ self.decor_state / len(self.decor_state) # we could also use full but then we need to scale differently
 
-        # normalizer for the decorrelation update
-        if self.whiten:            
-            normalizer = 1.0 / (torch.mean(self.decor_state**2, axis=0))
-            normalizer[torch.mean(self.decor_state**2, axis=0) < 1e-8] = 1.0
-            update = normalizer[:, None] * (self.weight -  self.eta * corr @ self.weight)
-            self.weight.grad = self.weight - update
-            return torch.mean(torch.square(lower_triangular(corr, offset=-1)))
-    
-        else:
-            self.weight.grad = corr @ self.weight.data
-            return torch.mean(torch.square(lower_triangular(corr, offset=-1)))
+        # unit variance term averaged over datapoints; faster via kronecker?
+        V = torch.diag(torch.mean(torch.square(self.decor_state), axis=0) - 1)
+
+        # compute update; equation (3) in technical note
+        self.weight.grad = (4.0/self.in_features) * ( ((1-self.kappa)/(self.in_features - 1)) * L + self.kappa * V ) @ self.weight
+
+        # compute loss; equation (1) in technical note as separate terms
+        # decorrelation_loss = (2*(1-self.kappa))/(self.size * (self.size - 1)) * torch.trace(L @ L.T) 
+        # variance_loss = (self.kappa/self.size) * torch.trace(V @ V.T)
+        return (1.0/self.in_features) * ( 2*(1-self.kappa)/(self.in_features - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""

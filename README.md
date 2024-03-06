@@ -3,10 +3,12 @@ This repository implements decorrelated and whitened backpropagation.
 ## DEBUG
 
 - Gaat bias goed?
-- apart batchnorm?
 - MNIST issues?
 - groeien de weights te snel? weight decay?
 
+## BATCH NORM
+
+- major performance gain when using batch_norm only... Issue for our scaling experiments?
 
 
 ## NOTES
