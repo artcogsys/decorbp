@@ -8,3 +8,4 @@
 --lr=1e-5
 --decor_lr=1e1
 --kappa=1e-3
+--downsample_perc=0.1

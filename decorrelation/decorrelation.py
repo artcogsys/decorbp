@@ -86,26 +86,9 @@ class Decorrelation(nn.Module):
         if self.bias is not None:
             self.bias.grad = self.decor_state.mean(axis=0)
 
-        # # NOTE: this is the notation as used in the derivation
-        # # strictly lower triangular part of x x' averaged over datapoints
-        # L = torch.tril(self.decor_state.T @ self.decor_state) / len(self.decor_state)
-        # # L = self.decor_state.T @ self.decor_state / len(self.decor_state) # we could also use full but then we need to scale differently
-
-        # # unit variance term averaged over datapoints; faster via kronecker?
-        # V = torch.diag(torch.mean(torch.square(self.decor_state) - 1.0, axis=0))
-
-        # # compute update; equation (3) in technical note
-        # self.weight.grad = (4.0/self.in_features) * ( ((1-self.kappa)/(self.in_features - 1)) * L + self.kappa * V ) @ self.weight
-
-        # # compute loss; equation (1) in technical note as separate terms
-        # # decorrelation_loss = (2*(1-self.kappa))/(self.size * (self.size - 1)) * torch.trace(L @ L.T) 
-        # # variance_loss = (self.kappa/self.size) * torch.trace(V @ V.T)
-        # return (1.0/self.in_features) * ( 2*(1-self.kappa)/(self.in_features - 1) * torch.trace(L @ L.T) + self.kappa * torch.trace(V @ V.T) )
-
         # strictly lower triangular part of x x' averaged over datapoints
-        L = torch.tril(self.decor_state.T @ self.decor_state) / len(self.decor_state)
-        # L = self.decor_state.T @ self.decor_state / len(self.decor_state) # we could also use full but then we need to scale differently
-
+        L = torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
+    
         # unit variance term averaged over datapoints
         v = torch.mean(self.decor_state**2 - 1.0, axis=0)
 
@@ -115,9 +98,7 @@ class Decorrelation(nn.Module):
 
         self.weight.grad = alpha * L @ self.weight + beta * v * self.weight
 
-        # # compute loss; equation (1) in technical note as separate terms
-        # # decorrelation_loss = (2*(1-self.kappa))/(self.size * (self.size - 1)) * torch.trace(L @ L.T) 
-        # # variance_loss = (self.kappa/self.size) * torch.trace(V @ V.T)
+        # compute loss
         return (1.0/self.in_features) * ( 2*(1-self.kappa)/(self.in_features - 1) * torch.sum(lower_triangular(L, offset=-1)) + self.kappa * torch.sum(v**2) )
 
 class DecorLinear(Decorrelation):
