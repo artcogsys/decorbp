@@ -5,6 +5,7 @@ import numpy as np
 import argparse
 from experiments import get_experiment
 from decorrelation.training import decor_train, bp_train
+import time
 
 def parse_arguments():
 
@@ -38,9 +39,13 @@ if __name__ == '__main__':
 
         if i == 0:
             print('Decorrelated BP:')
+            tic=time.time()
             res = decor_train(args, model, lossfun, train_loader, device)
+            print(f'time: {time.time() - tic:.2} s')
         else:
             print('Regular BP:')
+            tic=time.time()
             res = bp_train(args, model, lossfun, train_loader, device)
+            print(f'time: {time.time() - tic:.2} s')
 
     
