@@ -4,8 +4,9 @@ from decorrelation.decorrelation import lower_triangular, decor_modules
 import numpy as np
 import torch
 
-def plot_loss(ax, loss):
-    ax.plot(loss)
+def plot_loss(ax, *losses):
+    for L in losses:
+        ax.plot(L)
     ax.set_ylabel('loss')
     ax.set_xlabel('epoch')
     ax.set_title('loss')
@@ -41,7 +42,7 @@ def variance_histogram(ax, *Cs, labels = None):
 
 def plot_covariance_matrix(ax, C):
     im = ax.imshow(C, cmap=plt.get_cmap('hot'), interpolation='nearest')
-    ax.set_title('$x_i x_j$ correlated')
+    ax.set_title('$<x_i x_j>$')
     ax.axis('off')
     plt.colorbar(im, fraction=0.046, pad=0.04)
 

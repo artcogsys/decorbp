@@ -36,8 +36,7 @@ class Decorrelation(nn.Module):
         """"Params:
             - in_features: input dimensionality
             - bias: whether or not to demean the data
-            - whiten: whether or not to whiten the data
-            - method: decorrelation method: 'copi' or 'gs' (gram-schmidt)
+            - kappa: decorrelation strength (0-1)
             - eta: decorrelation step size (eta = 0: variance constraint only; eta > 0: pushes towards normalized decorrelation)
         """
 
@@ -80,23 +79,41 @@ class Decorrelation(nn.Module):
         return F.linear(input.view(len(input), -1), self.weight, self.bias).view(input.shape)
 
     def update(self):
-        """Implements Gram-Schmidt decorrelation update"""
+        """Implements decorrelation update"""
 
         # If using a bias, it should demean the data; should not be used as such since the step size will be too large
         if self.bias is not None:
             self.bias.grad = self.decor_state.mean(axis=0)
 
-        # strictly lower triangular part of x x' averaged over datapoints
-        L = torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
-    
-        # unit variance term averaged over datapoints
-        v = torch.mean(self.decor_state**2 - 1.0, axis=0)
+        if True: # full R
 
-        # compute update; equation (4) in technical note
-        self.weight.grad = (1.0 - self.kappa) * L @ self.weight + 2 * self.kappa * v * self.weight
+            neg_eye = 1.0 - torch.eye(self.in_features) # NOTE: precompute this
 
-        # compute loss
-        return (1-self.kappa) * torch.sum(lower_triangular(L, offset=-1)**2) + self.kappa * torch.sum(v**2)
+            # covariance without diagonal
+            C = neg_eye * (self.decor_state.T @ self.decor_state / len(self.decor_state))
+                
+            # unit variance term averaged over datapoints
+            v = torch.mean(self.decor_state**2 - 1.0, axis=0)
+
+            # compute update
+            self.weight.grad = ((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + 2 * self.kappa * v * self.weight
+
+            # compute loss
+            return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
+        
+        else: # NOTE: THIS STILL NEEDS THE DIMENSIONALITY SCALING
+
+            # strictly lower triangular part of x x' averaged over datapoints
+            L = torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
+        
+            # unit variance term averaged over datapoints
+            v = torch.mean(self.decor_state**2 - 1.0, axis=0)
+
+            # compute update; equation (4) in technical note
+            self.weight.grad = (1.0 - self.kappa) * L @ self.weight + 2 * self.kappa * v * self.weight
+
+            # compute loss
+            return (1-self.kappa) * torch.sum(lower_triangular(L, offset=-1)**2) + self.kappa * torch.sum(v**2)
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""

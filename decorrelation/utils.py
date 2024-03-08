@@ -3,6 +3,19 @@ import numpy as np
 from decorrelation.decorrelation import decor_parameters, decor_modules, decor_update #, covariance
 from time import time
 
+def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
+    """Generate correlated data (ugly solution; we could use vines)
+
+    Args:
+        d (int): dimensionality
+        num_samples (int): number of samples
+        strength (float): strength of correlation (0-1); 0.0 implies uncorrelated data (in infinite data limit)
+        dtype (torch.dtype): data type
+    """
+    dist = torch.distributions.MultivariateNormal(torch.zeros(d), (1-strength) * torch.eye(d) + strength * torch.ones((d, d)))
+    data = dist.sample((num_samples,)).to(dtype)    
+    return (data - torch.mean(data, axis=0)) / torch.std(data, axis=0)
+
 def decor_train(args, model, lossfun, train_loader, device):
     """Train using decorrelated backpropagation. Can also be used to run regular bp with args.decor_lr = 0.0. But for fair comparison see bp_train.
     """
