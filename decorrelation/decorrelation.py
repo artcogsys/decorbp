@@ -93,13 +93,10 @@ class Decorrelation(nn.Module):
         v = torch.mean(self.decor_state**2 - 1.0, axis=0)
 
         # compute update; equation (4) in technical note
-        alpha = (1.0 - self.kappa) / (self.in_features * (self.in_features-1))
-        beta = self.kappa / self.in_features
-
-        self.weight.grad = alpha * L @ self.weight + beta * v * self.weight
+        self.weight.grad = (1.0 - self.kappa) * L @ self.weight + 2 * self.kappa * v * self.weight
 
         # compute loss
-        return (1.0/self.in_features) * ( 2 * (1-self.kappa)/(self.in_features - 1) * torch.sum(lower_triangular(L, offset=-1)**2) + self.kappa * torch.sum(v**2) )
+        return (1-self.kappa) * torch.sum(lower_triangular(L, offset=-1)**2) + self.kappa * torch.sum(v**2)
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
