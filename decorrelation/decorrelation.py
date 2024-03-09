@@ -11,11 +11,6 @@ def decor_modules(model: nn.Module):
     """
     return list(filter(lambda m: isinstance(m, Decorrelation), model.modules()))
 
-# def decor_parameters(model: nn.Module):
-#     """Returns all decorrelation parameters as an iterable
-#     """
-#     return itertools.chain(*map( lambda m: m.decor_parameters(), decor_modules(model)))
-
 def decor_update(modules):
     """Updates all decorrelation modules and returns decorrelation loss
     """
@@ -65,19 +60,14 @@ class Decorrelation(nn.Module):
         self.kappa = kappa
         self.full = full
 
+        self.neg_eye = 1.0 - torch.eye(self.in_features, device=device) # NOTE: precompute this; device and dtype
+
         self.reset_parameters()
 
     def reset_parameters(self):
         if self.bias is not None:
             nn.init.zeros_(self.bias)
         nn.init.eye_(self.weight)
-
-    # def decor_parameters(self):
-    #     return [self.weight]
-    #     # if self.bias is not None:
-    #     #     return [self.weight, self.bias]
-    #     # else:
-    #     #     return [self.weight]
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         self.decor_state = F.linear(input.view(len(input), -1), self.weight, self.bias)
@@ -98,11 +88,10 @@ class Decorrelation(nn.Module):
 
         if self.full: # learn full R
 
-            neg_eye = 1.0 - torch.eye(self.in_features) # NOTE: precompute this; device and dtype
-
             # covariance without diagonal
-            C = neg_eye * (self.decor_state.T @ self.decor_state / len(self.decor_state))
-                
+            C = self.neg_eye * (self.decor_state.T @ self.decor_state / len(self.decor_state))
+            # C = self.neg_eye * torch.einsum('ni,nj->ij', self.decor_state, self.decor_state) / len(self.decor_state) # more expensive
+
             # unit variance term averaged over datapoints
             v = torch.mean(self.decor_state**2 - 1.0, axis=0)
 
@@ -130,10 +119,8 @@ class Decorrelation(nn.Module):
 
         if self.full: # learn full R
 
-            neg_eye = 1.0 - torch.eye(self.in_features) # NOTE: precompute this; device and dtype
-
             # covariance without diagonal
-            C = neg_eye * (self.decor_state.T @ self.decor_state / len(self.decor_state))
+            C = self.neg_eye * (self.decor_state.T @ self.decor_state / len(self.decor_state))
                 
             # unit variance term averaged over datapoints
             v = torch.mean(self.decor_state**2 - 1.0, axis=0)

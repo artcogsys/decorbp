@@ -24,7 +24,6 @@ def train(args, model, lossfun, train_loader, device, decorrelate=True):
 
     if decorrelate:
         decorrelators = decor_modules(model)
-    # decor_optimizer = torch.optim.SGD(decor_parameters(model), lr=args.decor_lr)
     
     L = np.zeros(args.epochs+1) # loss
     D = np.zeros(args.epochs+1) # decorrelation loss
@@ -35,8 +34,7 @@ def train(args, model, lossfun, train_loader, device, decorrelate=True):
         for batchnum, batch in enumerate(train_loader):
         
             optimizer.zero_grad() if args.lr > 0.0 else None
-            # decor_optimizer.zero_grad()
-
+          
             input = batch[0].to(device)
             target = batch[1].to(device)
 
