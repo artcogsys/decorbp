@@ -32,10 +32,10 @@ def lower_triangular(C: Tensor, offset: int):
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
-    def __init__(self, in_features: int, bias: bool = False, kappa: float = 1e-3, full=True, device = None, dtype = None) -> None:
+    def __init__(self, in_features: int, bias_lr: float = 0.0, kappa: float = 1e-3, full=True, device = None, dtype = None) -> None:
         """"Params:
             - in_features: input dimensionality
-            - bias: whether or not to demean the data
+            - bias_lr: debiases the data with a fixed learning rate (0.0: no debiasing)
             - kappa: decorrelation strength (0-1)
             - full: learn a full (True) or lower triangular (False) decorrelation matrix
             - eta: decorrelation step size (eta = 0: variance constraint only; eta > 0: pushes towards normalized decorrelation)
@@ -46,10 +46,11 @@ class Decorrelation(nn.Module):
 
         self.in_features = in_features
         self.register_buffer("weight", torch.empty(self.in_features, self.in_features, **factory_kwargs))
-        if bias:           
+        if bias_lr > 0.0:          
             self.register_buffer("bias", torch.empty(in_features, **factory_kwargs))
         else:
             self.bias = None
+        self.bias_lr = bias_lr
 
         self.kappa = kappa
         self.full = full
@@ -62,10 +63,11 @@ class Decorrelation(nn.Module):
         nn.init.eye_(self.weight)
 
     def decor_parameters(self):
-        if self.bias is not None:
-            return [self.weight, self.bias]
-        else:
-            return [self.weight]
+        return [self.weight]
+        # if self.bias is not None:
+        #     return [self.weight, self.bias]
+        # else:
+        #     return [self.weight]
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         self.decor_state = F.linear(input.view(len(input), -1), self.weight, self.bias)
@@ -82,7 +84,7 @@ class Decorrelation(nn.Module):
 
         # If using a bias, it should demean the data; should not be used as such since the step size will be too large
         if self.bias is not None:
-            self.bias.grad = self.decor_state.mean(axis=0)
+            self.bias.data -= self.bias_lr * self.decor_state.mean(axis=0)
 
         if self.full: # learn full R
 
@@ -117,10 +119,10 @@ class Decorrelation(nn.Module):
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, decor_bias=False, kappa = 1e-3, full: bool = True,
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, bias_lr: float = 0.0, kappa = 1e-3, full: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__(in_features, bias=decor_bias, kappa=kappa, full=full, **factory_kwargs)
+        super().__init__(in_features, bias_lr=bias_lr, kappa=kappa, full=full, **factory_kwargs)
         self.linear = nn.Linear(in_features, out_features, bias=bias, **factory_kwargs)
         
     def forward(self, input: Tensor) -> Tensor:
@@ -132,13 +134,13 @@ class DecorConv2d(Decorrelation):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
-                 bias: bool = True, decor_bias: bool = False, kappa = 1e-3, full: bool = True, downsample_perc=1.0,
+                 bias: bool = True, bias_lr: float = 0.0, kappa = 1e-3, full: bool = True, downsample_perc=1.0,
                  device=None, dtype=None) -> None:
 
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(in_features=in_channels * np.prod(kernel_size), bias=decor_bias, kappa=kappa, full=full, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), bias_lr=bias_lr, kappa=kappa, full=full, **factory_kwargs)        
         self.downsample_perc = downsample_perc
 
         self.in_channels = in_channels
