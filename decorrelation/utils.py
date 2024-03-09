@@ -17,7 +17,15 @@ def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
     return (data - torch.mean(data, axis=0)) / torch.std(data, axis=0)
 
 def train(args, model, lossfun, train_loader, device, decorrelate=True):
-    """Train using (decorrelated) backpropagation. Can also be used to run regular bp with args.decor_lr = 0.0. But for fair comparison see bp_train.
+    """Train using (decorrelated) backpropagation.
+
+    Args:
+        args (argparse.Namespace): command line arguments
+        model (torch.nn.Module): model
+        lossfun (callable): loss function
+        train_loader (torch.utils.data.DataLoader): training data loader
+        device (torch.device): device
+        decorrelate (bool): whether or not to train decorrelation layers
     """
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) if args.lr > 0.0 else None
@@ -62,42 +70,58 @@ def train(args, model, lossfun, train_loader, device, decorrelate=True):
     return model, L, D, T
 
 
+def train_np(args, model, lossfun, train_loader, device, decorrelate=True):
+    """Train using (decorrelated) node perturbation.
 
-# def bp_train(args, model, lossfun, train_loader, device):
-#     """Train using backpropagation only. A fair comparison would require optimal settings for learning rate and batch size as well as 
-#     running on models that don't incorporate the decorrelation layers.
-#     """
+    Args:
+        args (argparse.Namespace): command line arguments
+        model (torch.nn.Module): model
+        lossfun (callable): loss function
+        train_loader (torch.utils.data.DataLoader): training data loader
+        device (torch.device): device
+        decorrelate (bool): whether or not to train decorrelation layers
+    """
+  
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) if args.lr > 0.0 else None
 
-#     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-
-#     L = np.zeros(args.epochs+1) # loss
-#     T = np.zeros(args.epochs+1) # time per train epoch
-#     for epoch in range(args.epochs+1):
-
-#         tic = time()
-#         for batchnum, batch in enumerate(train_loader):
-        
-#             optimizer.zero_grad()
-
-#             input = batch[0].to(device)
-#             target = batch[1].to(device)
-
-#             loss = lossfun(model(input), target)
-
-#             if epoch > 0:
-#                 loss.backward()
-#                 optimizer.step()
-
-#             L[epoch] += loss.item()
-                        
-#         L[epoch] /= batchnum
-        
-#         if epoch > 0:
-#             T[epoch] = time() - T[epoch-1]
-
-#         if epoch > 0:
-#             T[epoch] = time() - tic
-
-#         print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {L[epoch]:3f}')
+    if decorrelate:
+        decorrelators = decor_modules(model)
     
-#     return model, L, T
+    L = np.zeros(args.epochs+1) # loss
+    D = np.zeros(args.epochs+1) # decorrelation loss
+    T = np.zeros(args.epochs+1) # time per train epoch
+
+    with torch.no_grad():
+        
+        for epoch in range(args.epochs+1):
+
+            tic = time()
+            for batchnum, batch in enumerate(train_loader):
+            
+                optimizer.zero_grad() if args.lr > 0.0 else None
+            
+                input = batch[0].to(device)
+                target = batch[1].to(device)
+
+                loss = lossfun(model(input), target)
+
+                if epoch > 0 and args.lr > 0.0:
+                    # loss.backward()
+                    optimizer.step()
+
+                if decorrelate:
+                    if epoch > 0:
+                        D[epoch] += decor_update(decorrelators)
+                    else:
+                        D[epoch] += decor_loss(decorrelators)
+        
+                L[epoch] += loss
+                        
+            L[epoch] /= batchnum
+
+        if epoch > 0:
+            T[epoch] = time() - tic
+
+        print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {L[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}')
+
+    return model, L, D, T
