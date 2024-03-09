@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from decorrelation.decorrelation import decor_parameters, decor_modules, decor_update #, covariance
+from decorrelation.decorrelation import decor_modules, decor_update #, covariance
 from time import time
 
 def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
@@ -16,14 +16,15 @@ def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
     data = dist.sample((num_samples,)).to(dtype)    
     return (data - torch.mean(data, axis=0)) / torch.std(data, axis=0)
 
-def decor_train(args, model, lossfun, train_loader, device):
-    """Train using decorrelated backpropagation. Can also be used to run regular bp with args.decor_lr = 0.0. But for fair comparison see bp_train.
+def train(args, model, lossfun, train_loader, device, decorrelate=True):
+    """Train using (decorrelated) backpropagation. Can also be used to run regular bp with args.decor_lr = 0.0. But for fair comparison see bp_train.
     """
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) if args.lr > 0.0 else None
 
-    decorrelators = decor_modules(model)
-    decor_optimizer = torch.optim.SGD(decor_parameters(model), lr=args.decor_lr)
+    if decorrelate:
+        decorrelators = decor_modules(model)
+    # decor_optimizer = torch.optim.SGD(decor_parameters(model), lr=args.decor_lr)
     
     L = np.zeros(args.epochs+1) # loss
     D = np.zeros(args.epochs+1) # decorrelation loss
@@ -34,7 +35,7 @@ def decor_train(args, model, lossfun, train_loader, device):
         for batchnum, batch in enumerate(train_loader):
         
             optimizer.zero_grad() if args.lr > 0.0 else None
-            decor_optimizer.zero_grad()
+            # decor_optimizer.zero_grad()
 
             input = batch[0].to(device)
             target = batch[1].to(device)
@@ -45,11 +46,13 @@ def decor_train(args, model, lossfun, train_loader, device):
                 loss.backward()
                 optimizer.step()
 
-            decor_loss = decor_update(decorrelators)
-            if epoch > 0:
-                decor_optimizer.step()
-
-            D[epoch] += decor_loss
+            if decorrelate:
+                if epoch > 0:
+                    decor_loss = decor_loss(decorrelators)
+                else:
+                    decor_loss = decor_update(decorrelators)
+                D[epoch] += decor_loss
+    
             L[epoch] += loss
                      
         L[epoch] /= batchnum
@@ -63,41 +66,41 @@ def decor_train(args, model, lossfun, train_loader, device):
 
 
 
-def bp_train(args, model, lossfun, train_loader, device):
-    """Train using backpropagation only. A fair comparison would require optimal settings for learning rate and batch size as well as 
-    running on models that don't incorporate the decorrelation layers.
-    """
+# def bp_train(args, model, lossfun, train_loader, device):
+#     """Train using backpropagation only. A fair comparison would require optimal settings for learning rate and batch size as well as 
+#     running on models that don't incorporate the decorrelation layers.
+#     """
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+#     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    L = np.zeros(args.epochs+1) # loss
-    T = np.zeros(args.epochs+1) # time per train epoch
-    for epoch in range(args.epochs+1):
+#     L = np.zeros(args.epochs+1) # loss
+#     T = np.zeros(args.epochs+1) # time per train epoch
+#     for epoch in range(args.epochs+1):
 
-        tic = time()
-        for batchnum, batch in enumerate(train_loader):
+#         tic = time()
+#         for batchnum, batch in enumerate(train_loader):
         
-            optimizer.zero_grad()
+#             optimizer.zero_grad()
 
-            input = batch[0].to(device)
-            target = batch[1].to(device)
+#             input = batch[0].to(device)
+#             target = batch[1].to(device)
 
-            loss = lossfun(model(input), target)
+#             loss = lossfun(model(input), target)
 
-            if epoch > 0:
-                loss.backward()
-                optimizer.step()
+#             if epoch > 0:
+#                 loss.backward()
+#                 optimizer.step()
 
-            L[epoch] += loss.item()
+#             L[epoch] += loss.item()
                         
-        L[epoch] /= batchnum
+#         L[epoch] /= batchnum
         
-        if epoch > 0:
-            T[epoch] = time() - T[epoch-1]
+#         if epoch > 0:
+#             T[epoch] = time() - T[epoch-1]
 
-        if epoch > 0:
-            T[epoch] = time() - tic
+#         if epoch > 0:
+#             T[epoch] = time() - tic
 
-        print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {L[epoch]:3f}')
+#         print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {L[epoch]:3f}')
     
-    return model, L, T
+#     return model, L, T
