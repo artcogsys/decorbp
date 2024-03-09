@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from decorrelation.decorrelation import decor_modules, decor_update #, covariance
+from decorrelation.decorrelation import decor_modules, decor_update, decor_loss #, covariance
 from time import time
 
 def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
@@ -48,10 +48,9 @@ def train(args, model, lossfun, train_loader, device, decorrelate=True):
 
             if decorrelate:
                 if epoch > 0:
-                    decor_loss = decor_loss(decorrelators)
+                    D[epoch] += decor_update(decorrelators)
                 else:
-                    decor_loss = decor_update(decorrelators)
-                D[epoch] += decor_loss
+                    D[epoch] += decor_loss(decorrelators)
     
             L[epoch] += loss
                      

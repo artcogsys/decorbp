@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import argparse
 from experiments import get_experiment
-from decorrelation.utils import decor_train, bp_train
+from decorrelation.utils import train
 import time
 
 def parse_arguments():
@@ -19,7 +19,8 @@ def parse_arguments():
     parser.add_argument('--experiment', default='MNIST_MLP', type=str)
     parser.add_argument('--data_path', default='~/Data', type=str)
     parser.add_argument('--lr', default=1e-3, type=float)
-    parser.add_argument('--decor_lr', default=1e-4, type=float)
+    parser.add_argument('--decor_lr', default=1e-4, type=float, help="decorrelation update strength") 
+    parser.add_argument('--bias_lr', default=0.0, type=float, help="demeaning update strength") 
     parser.add_argument('--kappa', default=1e-3, type=float, help="strenght of unit variance constraint [0-1]") 
     parser.add_argument('--downsample_perc', default=1.0, type=float, help="downsampling for covariance computation") 
     
@@ -42,12 +43,12 @@ if __name__ == '__main__':
         if i == 0:
             print('Decorrelated BP:')
             tic=time.time()
-            res = decor_train(args, model, lossfun, train_loader, device)
+            res = train(args, model, lossfun, train_loader, device, decorrelate=True)
             print(f'time: {time.time() - tic:.2} s')
         else:
             print('Regular BP:')
             tic=time.time()
-            res = bp_train(args, model, lossfun, train_loader, device)
+            res = train(args, model, lossfun, train_loader, device, decorrelate=False)
             print(f'time: {time.time() - tic:.2} s')
 
     

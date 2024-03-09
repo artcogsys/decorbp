@@ -5,9 +5,9 @@ class MLP(nn.Sequential):
     """Simple MLP example"""
 
     def __init__(self, in_features, args):
-        super().__init__(DecorLinear(in_features, 100, kappa=args.kappa),
+        super().__init__(DecorLinear(in_features, 100, decor_lr=args.decor_lr, bias_lr=args.bias_lr, kappa=args.kappa),
                         nn.LeakyReLU(),
-                        DecorLinear(100, 10, kappa=args.kappa)
+                        DecorLinear(100, 10, decor_lr=args.decor_lr, bias_lr=args.bias_lr, kappa=args.kappa)
                         )
 
     def forward(self, x):
@@ -18,10 +18,11 @@ class ConvNet(nn.Sequential):
     """Simple ConvNet example"""
 
     def __init__(self, in_channels, args):
-        super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), kappa=args.kappa, downsample_perc=args.downsample_perc),
+        super().__init__(DecorConv2d(in_channels, out_channels=5, kernel_size=(5,5), decor_lr=args.decor_lr, bias_lr=args.bias_lr,
+                                     kappa=args.kappa, downsample_perc=args.downsample_perc),
                         nn.LeakyReLU(),
                         nn.Flatten(),
-                        DecorLinear(2880, 10, kappa=args.kappa)
+                        DecorLinear(2880, 10, decor_lr=args.decor_lr, bias_lr=args.bias_lr, kappa=args.kappa)
                         )
 
     def forward(self, x):
