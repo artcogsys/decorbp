@@ -160,11 +160,15 @@ class DecorConv2d(Decorrelation):
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
                  bias: bool = True, decor_lr: float = 0.0, bias_lr: float = 0.0, kappa = 1e-3, full: bool = True, downsample_perc=1.0,
                  device=None, dtype=None) -> None:
+        """
+
+        """
 
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
         super().__init__(in_features=in_channels * np.prod(kernel_size), decor_lr=decor_lr, bias_lr=bias_lr, kappa=kappa, full=full, **factory_kwargs)        
+        
         self.downsample_perc = downsample_perc
 
         self.in_channels = in_channels
@@ -188,8 +192,16 @@ class DecorConv2d(Decorrelation):
     def forward(self, input: Tensor) -> Tensor:
 
         # we store a downsampled version for input decorrelation and diagonal computation
-        idx = np.random.choice(np.arange(len(input)), size= int(len(input) * self.downsample_perc)) # could work better on downsampled patches instead
-        self.decor_state = self.decorrelate(input[idx])
+        if self.downsample_perc is None:
+            num_samples = torch.min([len(input), self.in_features+1])
+            idx = np.random.choice(np.arange(len(input)), size=num_samples)
+            self.decor_state = self.decorrelate(input[idx])
+        elif self.downsample_perc < 1.0:
+            num_samples = int(len(input) * self.downsample_perc)
+            idx = np.random.choice(np.arange(len(input)), size=num_samples)
+            self.decor_state = self.decorrelate(input[idx])
+        else:
+            self.decor_state = self.decorrelate(input)
 
         # efficiently combines the patch-wise R update with the convolutional W update on all data
         weight = nn.functional.conv2d(self.weight.view(self.in_features, self.in_channels, *self.kernel_size).moveaxis(0, 1),
