@@ -32,11 +32,12 @@ def lower_triangular(C: Tensor, offset: int):
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
-    def __init__(self, in_features: int, bias: bool = False, kappa: float = 1e-3, device = None, dtype = None) -> None:
+    def __init__(self, in_features: int, bias: bool = False, kappa: float = 1e-3, full=True, device = None, dtype = None) -> None:
         """"Params:
             - in_features: input dimensionality
             - bias: whether or not to demean the data
             - kappa: decorrelation strength (0-1)
+            - full: learn a full (True) or lower triangular (False) decorrelation matrix
             - eta: decorrelation step size (eta = 0: variance constraint only; eta > 0: pushes towards normalized decorrelation)
         """
 
@@ -51,6 +52,7 @@ class Decorrelation(nn.Module):
             self.bias = None
 
         self.kappa = kappa
+        self.full = full
 
         self.reset_parameters()
 
@@ -69,9 +71,6 @@ class Decorrelation(nn.Module):
         self.decor_state = F.linear(input.view(len(input), -1), self.weight, self.bias)
         return self.decor_state.view(input.shape)
     
-    # def __call__(self, input: Tensor) -> Tensor:
-    #     return self.forward(input)
-
     def decorrelate(self, input: Tensor):
         """Applies the decorrelating transform. Can be overloaded in composite functions to return the decorrelating transform.
         Maps back to the original input.
@@ -85,9 +84,9 @@ class Decorrelation(nn.Module):
         if self.bias is not None:
             self.bias.grad = self.decor_state.mean(axis=0)
 
-        if True: # full R
+        if self.full: # learn full R
 
-            neg_eye = 1.0 - torch.eye(self.in_features) # NOTE: precompute this
+            neg_eye = 1.0 - torch.eye(self.in_features) # NOTE: precompute this; device and dtype
 
             # covariance without diagonal
             C = neg_eye * (self.decor_state.T @ self.decor_state / len(self.decor_state))
@@ -101,27 +100,27 @@ class Decorrelation(nn.Module):
             # compute loss
             return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
         
-        else: # NOTE: THIS STILL NEEDS THE DIMENSIONALITY SCALING
+        else: # learn lower triangular R
 
-            # strictly lower triangular part of x x' averaged over datapoints
-            L = torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
+            # strictly lower triangular part of x x' averaged over datapoints and normalized by square root of number of non-zero entries
+            L = torch.sqrt(torch.arange(self.in_features)) * torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
         
             # unit variance term averaged over datapoints
             v = torch.mean(self.decor_state**2 - 1.0, axis=0)
 
-            # compute update; equation (4) in technical note
+            # compute update
             self.weight.grad = (1.0 - self.kappa) * L @ self.weight + 2 * self.kappa * v * self.weight
 
             # compute loss
-            return (1-self.kappa) * torch.sum(lower_triangular(L, offset=-1)**2) + self.kappa * torch.sum(v**2)
+            return (1-self.kappa) * torch.sum(L*L) + self.kappa * torch.sum(v**2)
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, decor_bias=False, kappa = 1e-3,
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, decor_bias=False, kappa = 1e-3, full: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__(in_features, bias=decor_bias, kappa=kappa, **factory_kwargs)
+        super().__init__(in_features, bias=decor_bias, kappa=kappa, full=full, **factory_kwargs)
         self.linear = nn.Linear(in_features, out_features, bias=bias, **factory_kwargs)
         
     def forward(self, input: Tensor) -> Tensor:
@@ -133,13 +132,13 @@ class DecorConv2d(Decorrelation):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
-                 bias: bool = True, decor_bias: bool = False, kappa = 1e-3, downsample_perc=1.0,
+                 bias: bool = True, decor_bias: bool = False, kappa = 1e-3, full: bool = True, downsample_perc=1.0,
                  device=None, dtype=None) -> None:
 
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(in_features=in_channels * np.prod(kernel_size), bias=decor_bias, kappa=kappa, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), bias=decor_bias, kappa=kappa, full=full, **factory_kwargs)        
         self.downsample_perc = downsample_perc
 
         self.in_channels = in_channels
