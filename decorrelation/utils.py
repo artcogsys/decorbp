@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from decorrelation.decorrelation import decor_modules, decor_update, decor_loss #, covariance
 from time import time
+from decorrelation.node_perturbation import np_update
 
 def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
     """Generate correlated data (ugly solution; we could use vines)
@@ -99,14 +100,19 @@ def train_np(args, model, lossfun, train_loader, device, decorrelate=True):
             for batchnum, batch in enumerate(train_loader):
             
                 optimizer.zero_grad() if args.lr > 0.0 else None
-            
+                            
                 input = batch[0].to(device)
                 target = batch[1].to(device)
 
-                loss = lossfun(model(input), target)
+                output = model(input)
 
-                if epoch > 0 and args.lr > 0.0:
-                    # loss.backward()
+                loss = lossfun(output[:len(input)], target)
+                L[epoch] += loss
+
+                delta_loss = lossfun(output[len(input):], target) - loss
+                np_update(model, delta_loss)
+
+                if epoch > 0:
                     optimizer.step()
 
                 if decorrelate:
@@ -119,9 +125,10 @@ def train_np(args, model, lossfun, train_loader, device, decorrelate=True):
                         
             L[epoch] /= batchnum
 
-        if epoch > 0:
-            T[epoch] = time() - tic
+            if epoch > 0:
+                T[epoch] = time() - tic
 
-        print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {L[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}')
+            print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {L[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}')
 
     return model, L, D, T
+
