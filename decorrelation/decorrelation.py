@@ -60,8 +60,6 @@ class Decorrelation(nn.Module):
         self.kappa = kappa
         self.full = full
 
-        self.neg_eye = 1.0 - torch.eye(self.in_features, device=device) # NOTE: precompute this; device and dtype
-
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -70,6 +68,8 @@ class Decorrelation(nn.Module):
         nn.init.eye_(self.weight)
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        """In case of node perturbation we do not need to store decor_state and can immediately update the decorrelation parameters
+        """
         self.decor_state = F.linear(input.view(len(input), -1), self.weight, self.bias)
         return self.decor_state.view(input.shape)
     
@@ -88,18 +88,24 @@ class Decorrelation(nn.Module):
 
         if self.full: # learn full R
 
-            # covariance without diagonal
-            C = self.neg_eye * (self.decor_state.T @ self.decor_state / len(self.decor_state))
-            # C = self.neg_eye * torch.einsum('ni,nj->ij', self.decor_state, self.decor_state) / len(self.decor_state) # more expensive
+            # covariance without diagonal; NOTE: expensive operation
+            C = self.decor_state.T @ self.decor_state / len(self.decor_state)
+
+            # variance terms
+            c = torch.diag(C)
+
+            # remove diagonal
+            C -= torch.diag(c)
 
             # unit variance term averaged over datapoints
-            v = torch.mean(self.decor_state**2 - 1.0, axis=0)
+            v = torch.mean(c - 1.0, axis=0)
 
-            # compute update
+            # compute update; NOTE: expensive operation
             self.weight.data -= self.decor_lr * (((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + 2 * self.kappa * v * self.weight)
 
             # compute loss; could lead to very high values if we are not careful
             return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
+        
         
         else: # learn lower triangular R
 
@@ -119,11 +125,17 @@ class Decorrelation(nn.Module):
 
         if self.full: # learn full R
 
-            # covariance without diagonal
-            C = self.neg_eye * (self.decor_state.T @ self.decor_state / len(self.decor_state))
-                
+            # covariance without diagonal; NOTE: expensive operation
+            C = self.decor_state.T @ self.decor_state / len(self.decor_state)
+
+            # variance terms
+            c = torch.diag(C)
+
+            # remove diagonal
+            C -= torch.diag(c)
+                            
             # unit variance term averaged over datapoints
-            v = torch.mean(self.decor_state**2 - 1.0, axis=0)
+            v = torch.mean(c - 1.0, axis=0)
 
             # compute loss
             return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))

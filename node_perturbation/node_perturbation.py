@@ -64,29 +64,3 @@ class NPLinear(NodePerturbation):
 
         return output
 
-    
-
-# class NPLinear(nn.Linear):
-#     """Node perturbation wrapper for a module"""
-
-#     def __init__(self, in_features: int, out_features: int, sampler: torch.distributions.Distribution = torch.distributions.Normal(0.0, 1.0), **kwargs) -> None:
-#         super().__init__(in_features, out_features, **kwargs)
-#         self.sampler = sampler
-#         self.squared_norm = torch.empty(1, device=self.weight.device, dtype=self.weight.dtype)
-
-#     def forward(self, input):
-
-#         noise = 1e-3 * self.sampler.sample(input.shape).to(input.device)
-#         output = super().forward(torch.concat([input, input + noise]))
-
-#         delta_a = output[len(input):] - output[:len(input)]
-
-#         self.squared_norm = torch.sum(delta_a**2)
-#         self.weight.grad = delta_a.T @ input
-#         self.bias.grad = torch.mean(delta_a, axis=0) # guess
-
-#         return output
-    
-
-
-    

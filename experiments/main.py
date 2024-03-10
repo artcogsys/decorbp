@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import argparse
 from experiments import get_experiment
-from decorrelation.utils import train
+from decorrelation.utils import decor_train
 import time
 
 def parse_arguments():
@@ -43,12 +43,12 @@ if __name__ == '__main__':
         if i == 0:
             print('Decorrelated BP:')
             tic=time.time()
-            res = train(args, model, lossfun, train_loader, device, decorrelate=True)
+            res = decor_train(args, model, lossfun, train_loader, device, decorrelate=True)
             print(f'time: {time.time() - tic:.2} s')
         else:
             print('Regular BP:')
             tic=time.time()
-            res = train(args, model, lossfun, train_loader, device, decorrelate=False)
+            res = decor_train(args, model, lossfun, train_loader, device, decorrelate=False)
             print(f'time: {time.time() - tic:.2} s')
 
     
