@@ -4,7 +4,7 @@ from decorrelation.decorrelation import decor_modules, decor_update, decor_loss 
 from time import time
 from node_perturbation.node_perturbation import np_update
 
-def np_train(args, model, lossfun, train_loader, device, decorrelate=True, interval=1):
+def np_train(args, model, lossfun, train_loader, test_loader=None, device=None, decorrelate=True, interval=1):
     """Train using (decorrelated) node perturbation.
 
     NOTE: we want to integrate this with decorrelation.utils one level higher up and allow mixed BP, NP, and decorrelation training.
@@ -14,6 +14,7 @@ def np_train(args, model, lossfun, train_loader, device, decorrelate=True, inter
         model (torch.nn.Module): model
         lossfun (callable): loss function
         train_loader (torch.utils.data.DataLoader): training data loader
+        test_loader (torch.utils.data.DataLoader): test data loader
         device (torch.device): device
         decorrelate (bool): whether or not to train decorrelation layers
         interval (int): interval for decorrelation updates
@@ -24,7 +25,7 @@ def np_train(args, model, lossfun, train_loader, device, decorrelate=True, inter
     if decorrelate:
         decorrelators = decor_modules(model)
     
-    L = np.zeros(args.epochs+1) # loss
+    train_loss = np.zeros(args.epochs+1) # loss
     D = np.zeros(args.epochs+1) # decorrelation loss
     T = np.zeros(args.epochs+1) # time per train epoch
 
@@ -43,7 +44,7 @@ def np_train(args, model, lossfun, train_loader, device, decorrelate=True, inter
                 output = model(torch.concat([input, input]))
 
                 loss = lossfun(output[:len(input)], target)
-                L[epoch] += loss
+                train_loss[epoch] += loss
 
                 delta_loss = lossfun(output[len(input):], target) - loss
                 np_update(model, delta_loss)
@@ -56,14 +57,23 @@ def np_train(args, model, lossfun, train_loader, device, decorrelate=True, inter
                     else:
                         D[epoch] += decor_loss(decorrelators)
         
-                L[epoch] += loss
+                train_loss[epoch] += loss
                         
-            L[epoch] /= batchnum
+            train_loss[epoch] /= batchnum
 
             if epoch > 0:
                 T[epoch] = time() - tic
 
-            print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {L[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}')
+            if test_loader is not None:
+                with torch.no_grad():
+                    test_loss = 0.0
+                    for batchnum, batch in enumerate(test_loader):
+                        input = batch[0].to(device)
+                        target = batch[1].to(device)
+                        test_loss += lossfun(model(input), target)
+                    test_loss /= batchnum
 
-    return model, L, D, T
+            print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tnp loss: {train_loss[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}\ttest loss: {test_loss:3f}')
+
+    return model, train_loss, D, T
 

@@ -17,7 +17,7 @@ def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
     data = dist.sample((num_samples,)).to(dtype)    
     return (data - torch.mean(data, axis=0)) / torch.std(data, axis=0)
 
-def decor_train(args, model, lossfun, train_loader, device, decorrelate=True, interval=1):
+def decor_train(args, model, lossfun, train_loader, test_loader=None, device=None, decorrelate=True, interval=1):
     """Train using (decorrelated) backpropagation.
 
     Args:
@@ -25,6 +25,7 @@ def decor_train(args, model, lossfun, train_loader, device, decorrelate=True, in
         model (torch.nn.Module): model
         lossfun (callable): loss function
         train_loader (torch.utils.data.DataLoader): training data loader
+        test_loader (torch.utils.data.DataLoader): test data loader
         device (torch.device): device
         decorrelate (bool): whether or not to train decorrelation layers
         interval (int): interval for decorrelation updates
@@ -35,7 +36,7 @@ def decor_train(args, model, lossfun, train_loader, device, decorrelate=True, in
     if decorrelate:
         decorrelators = decor_modules(model)
     
-    L = np.zeros(args.epochs+1) # loss
+    train_loss = np.zeros(args.epochs+1) # loss
     D = np.zeros(args.epochs+1) # decorrelation loss
     T = np.zeros(args.epochs+1) # time per train epoch
     for epoch in range(args.epochs+1):
@@ -60,13 +61,22 @@ def decor_train(args, model, lossfun, train_loader, device, decorrelate=True, in
                 else:
                     D[epoch] += decor_loss(decorrelators)
     
-            L[epoch] += loss
-                     
-        L[epoch] /= batchnum
+            train_loss[epoch] += loss
+                   
+        train_loss[epoch] /= batchnum
 
         if epoch > 0:
             T[epoch] = time() - tic
 
-        print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {L[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}')
+        if test_loader is not None:
+            with torch.no_grad():
+                test_loss = 0.0
+                for batchnum, batch in enumerate(test_loader):
+                    input = batch[0].to(device)
+                    target = batch[1].to(device)
+                    test_loss += lossfun(model(input), target)
+                test_loss /= batchnum
 
-    return model, L, D, T
+        print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {train_loss[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}\ttest loss: {test_loss:3f}')
+
+    return model, train_loss, test_loss, D, T
