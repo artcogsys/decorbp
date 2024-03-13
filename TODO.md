@@ -1,2 +1,4 @@
 - Create general training code which can mix backpropagation, node perturbation and decorrelation
-- ...
+- Check against Constence
+- Double check data type precision
+- Generating test results also still needs to be added
