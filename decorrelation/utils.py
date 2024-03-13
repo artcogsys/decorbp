@@ -17,7 +17,7 @@ def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
     data = dist.sample((num_samples,)).to(dtype)    
     return (data - torch.mean(data, axis=0)) / torch.std(data, axis=0)
 
-def decor_train(args, model, lossfun, train_loader, device, decorrelate=True):
+def decor_train(args, model, lossfun, train_loader, device, decorrelate=True, interval=1):
     """Train using (decorrelated) backpropagation.
 
     Args:
@@ -27,6 +27,7 @@ def decor_train(args, model, lossfun, train_loader, device, decorrelate=True):
         train_loader (torch.utils.data.DataLoader): training data loader
         device (torch.device): device
         decorrelate (bool): whether or not to train decorrelation layers
+        interval (int): interval for decorrelation updates
     """
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) if args.lr > 0.0 else None
@@ -53,7 +54,7 @@ def decor_train(args, model, lossfun, train_loader, device, decorrelate=True):
                 loss.backward()
                 optimizer.step()
 
-            if decorrelate:
+            if decorrelate and epoch % interval == 0:
                 if epoch > 0:
                     D[epoch] += decor_update(decorrelators)
                 else:
