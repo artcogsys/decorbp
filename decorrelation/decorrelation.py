@@ -144,13 +144,13 @@ class Decorrelation(nn.Module):
         if self.downsample_perc is None:
             num_samples = torch.min([len(input), self.in_features+1])
             idx = np.random.choice(np.arange(len(input)), size=num_samples)
-            self.decor_state = self.decorrelate(input[idx])
+            return input[idx]
         elif self.downsample_perc < 1.0:
             num_samples = int(len(input) * self.downsample_perc)
             idx = np.random.choice(np.arange(len(input)), size=num_samples)
-            self.decor_state = self.decorrelate(input[idx])
+            return input[idx]
         else:
-            self.decor_state = self.decorrelate(input)
+            return input
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
@@ -213,7 +213,7 @@ class DecorConv2d(Decorrelation):
     def forward(self, input: Tensor) -> Tensor:
 
         # we store a downsampled version for input decorrelation and diagonal computation
-        self.decor_state = self.decorrelate(self.downsample(input))
+        self.decor_state = self.decorrelate(self.downsample(input)).reshape(-1, self.in_features)
 
         # efficiently combines the patch-wise R update with the convolutional W update on all data
         weight = nn.functional.conv2d(self.weight.view(self.in_features, self.in_channels, *self.kernel_size).moveaxis(0, 1),
@@ -233,17 +233,17 @@ class DecorConv2d(Decorrelation):
         return self.forward_conv.output
     
     def decorrelate(self, input: Tensor):
-        """Applies the decorrelating transform.
+        """Applies the patchwise decorrelating transform and returns decorrelated feature maps
         """
         return nn.functional.conv2d(input, self.weight.view(self.in_features, self.in_channels, *self.kernel_size),
                                     bias=None, stride=self.stride, padding=self.padding, 
-                                    dilation=self.dilation).moveaxis(1, 3).reshape(-1, self.in_features)
+                                    dilation=self.dilation).moveaxis(1, 3)
         
-    def patches(self, input: Tensor):
-        """Returns the input patches via an identity mapping"""
-        identity = nn.Parameter(torch.empty(self.in_features, self.in_features, device=self.weight.device, dtype=self.weight.dtype), requires_grad=False)
-        nn.init.eye_(identity)
-        return nn.functional.conv2d(input, identity.view(self.in_features, self.in_channels, *self.kernel_size),
-                                    bias=None, stride=self.stride, padding=self.padding, 
-                                    dilation=self.dilation).moveaxis(1, 3).reshape(-1, self.in_features)
+    # def patches(self, input: Tensor):
+    #     """Returns the input patches via an identity mapping"""
+    #     identity = nn.Parameter(torch.empty(self.in_features, self.in_features, device=self.weight.device, dtype=self.weight.dtype), requires_grad=False)
+    #     nn.init.eye_(identity)
+    #     return nn.functional.conv2d(input, identity.view(self.in_features, self.in_channels, *self.kernel_size),
+    #                                 bias=None, stride=self.stride, padding=self.padding, 
+    #                                 dilation=self.dilation).moveaxis(1, 3).reshape(-1, self.in_features)
 
