@@ -2,3 +2,7 @@
 - Check against Constence codebase
 - Double check data type precision
 - Create separate package for node_perturbation
+- implement downsampling at level of Decorrelation (on level of patches*samples?)
+- factory kwargs for all decorrelation parameters
+- add old learning rule
+- remove bias
