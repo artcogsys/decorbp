@@ -95,7 +95,6 @@ class Decorrelation(nn.Module):
             # compute loss; could lead to very high values if we are not careful
             return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
         
-        
         else: # learn lower triangular R
 
             # strictly lower triangular part of x x' averaged over datapoints and normalized by square root of number of non-zero entries
@@ -140,6 +139,18 @@ class Decorrelation(nn.Module):
             # compute loss
             return (1-self.kappa) * torch.sum(L*L) + self.kappa * torch.sum(v**2)
 
+    def downsample(self, input: Tensor):
+        """Downsamples the input for covariance computation"""
+        if self.downsample_perc is None:
+            num_samples = torch.min([len(input), self.in_features+1])
+            idx = np.random.choice(np.arange(len(input)), size=num_samples)
+            self.decor_state = self.decorrelate(input[idx])
+        elif self.downsample_perc < 1.0:
+            num_samples = int(len(input) * self.downsample_perc)
+            idx = np.random.choice(np.arange(len(input)), size=num_samples)
+            self.decor_state = self.decorrelate(input[idx])
+        else:
+            self.decor_state = self.decorrelate(input)
 
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
@@ -162,7 +173,18 @@ class DecorConv2d(Decorrelation):
                  bias: bool = True, decor_lr: float = 0.0, kappa = 1e-3, full: bool = True, downsample_perc=1.0,
                  device=None, dtype=None) -> None:
         """
-
+        Args:
+            - in_channels: number of input channels
+            - out_channels: number of output channels
+            - kernel_size: size of the convolving kernel
+            - stride: stride of the convolution
+            - padding: zero-padding added to both sides of the input
+            - dilation: spacing between kernel elements
+            - bias: whether to add a learnable bias to the output
+            - decor_lr: decorrelation learning rate
+            - kappa: decorrelation strength (0-1)
+            - full: learn a full (True) or lower triangular (False) decorrelation matrix
+            - downsample_perc: downsampling for covariance computation
         """
 
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -191,23 +213,14 @@ class DecorConv2d(Decorrelation):
     def forward(self, input: Tensor) -> Tensor:
 
         # we store a downsampled version for input decorrelation and diagonal computation
-        if self.downsample_perc is None:
-            num_samples = torch.min([len(input), self.in_features+1])
-            idx = np.random.choice(np.arange(len(input)), size=num_samples)
-            self.decor_state = self.decorrelate(input[idx])
-        elif self.downsample_perc < 1.0:
-            num_samples = int(len(input) * self.downsample_perc)
-            idx = np.random.choice(np.arange(len(input)), size=num_samples)
-            self.decor_state = self.decorrelate(input[idx])
-        else:
-            self.decor_state = self.decorrelate(input)
+        self.decor_state = self.decorrelate(self.downsample(input))
 
         # efficiently combines the patch-wise R update with the convolutional W update on all data
         weight = nn.functional.conv2d(self.weight.view(self.in_features, self.in_channels, *self.kernel_size).moveaxis(0, 1),
                                       self.forward_conv.weight.flip(-1, -2),
                                       padding=0).moveaxis(0, 1)
                 
-        # applies the combined weight to generate the desired output
+        # applies the combined weight to the non-downsampled input to generate the desired output
         self.forward_conv.output = nn.functional.conv2d(input, weight,
                                          stride=self.stride,
                                          dilation=self.dilation,
@@ -220,7 +233,7 @@ class DecorConv2d(Decorrelation):
         return self.forward_conv.output
     
     def decorrelate(self, input: Tensor):
-        """Applies the decorrelating transform. Can be overloaded in composite functions to return the decorrelating transform 
+        """Applies the decorrelating transform.
         """
         return nn.functional.conv2d(input, self.weight.view(self.in_features, self.in_channels, *self.kernel_size),
                                     bias=None, stride=self.stride, padding=self.padding, 
