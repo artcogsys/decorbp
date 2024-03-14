@@ -19,6 +19,14 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": ["@experiments/config/MNIST_CONVNET.txt"]
+        },
+        {
+            "name": "CIFAR10_RESNET18",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": ["@experiments/config/CIFAR10_RESNET18.txt"]
         }
 
     ]

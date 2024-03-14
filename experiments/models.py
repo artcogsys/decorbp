@@ -29,36 +29,3 @@ class ConvNet(nn.Sequential):
     def forward(self, x):
         return super().forward(x)
     
-
-class LoadableNet(nn.Module):
-
-    def __init__(self, model_name, *, decor_lr: float = 0.0, bias_lr: float = 0.0, kappa = 1e-3, full: bool = True, downsample_perc: float =1.0, device = None, dtype = None):
-        super().__init__()
-        factory_kwargs = {'decor_lr': decor_lr, 'bias_lr': bias_lr, 'kappa': kappa, 'full': full, 'downsample_perc': downsample_perc, 'device': device, 'dtype': dtype}
-        self.model = torch.hub.load('pytorch/vision:v0.10.0', model_name)
-        self.replace_modules(self.model, **factory_kwargs)
-       
-    def forward(self, x):
-        return self.model(x)
-
-    def replace_modules(self, module, **kwargs):
-        """
-        replaces specific modules in model by modules specified by the replacement_fn
-        """
-        for name, layer in module.named_children():
-            if isinstance(layer, nn.Linear):
-                module.__setattr__(name, DecorLinear(layer.in_features, layer.out_features, bias=layer.bias is not None, **kwargs))
-            elif isinstance(layer, nn.Conv2d):
-                module.__setattr__(name, DecorConv2d(layer.in_channels, layer.out_channels, layer.kernel_size,
-                                                     stride = layer.stride, padding=layer.padding, dilation=layer.dilation,
-                                                     bias=layer.bias is not None, **kwargs))
-            elif isinstance(layer, nn.BatchNorm2d):
-                module.__setattr__(name, nn.Identity())
-            elif layer.children() is not None:
-                self.replace_modules(layer)
-
-
-if __name__ == '__main__':   
-    # testing functionality
-    model = LoadableNet('resnet18')
-    print(model.model)
