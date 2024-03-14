@@ -4,7 +4,7 @@ from decorrelation.decorrelation import decor_modules, decor_update, decor_loss 
 from time import time
 from node_perturbation.node_perturbation import np_update
 
-def np_train(args, model, lossfun, train_loader, test_loader=None, device=None, decorrelate=True, interval=1):
+def np_train(args, model, lossfun, train_loader, test_loader=None, device=None, decorrelate=True):
     """Train using (decorrelated) node perturbation.
 
     NOTE: we want to integrate this with decorrelation.utils one level higher up and allow mixed BP, NP, and decorrelation training.
@@ -17,7 +17,6 @@ def np_train(args, model, lossfun, train_loader, test_loader=None, device=None, 
         test_loader (torch.utils.data.DataLoader): test data loader
         device (torch.device): device
         decorrelate (bool): whether or not to train decorrelation layers
-        interval (int): interval for decorrelation updates
     """
   
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) if args.lr > 0.0 else None
@@ -51,7 +50,7 @@ def np_train(args, model, lossfun, train_loader, test_loader=None, device=None, 
                 if epoch > 0:
                     optimizer.step()
 
-                if decorrelate and epoch % interval == 0:
+                if decorrelate:
                     if epoch > 0:
                         D[epoch] += decor_update(decorrelators)
                     else:
@@ -64,9 +63,9 @@ def np_train(args, model, lossfun, train_loader, test_loader=None, device=None, 
             if epoch > 0:
                 T[epoch] = time() - tic
 
+            test_loss = 0.0
             if test_loader is not None:
                 with torch.no_grad():
-                    test_loss = 0.0
                     for batchnum, batch in enumerate(test_loader):
                         input = batch[0].to(device)
                         target = batch[1].to(device)
