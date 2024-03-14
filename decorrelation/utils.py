@@ -40,6 +40,8 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
     T = np.zeros(args.epochs+1) # time per train epoch
     for epoch in range(args.epochs+1):
 
+        model.train(True)
+
         tic = time()
         for batchnum, batch in enumerate(train_loader):
         
@@ -67,14 +69,15 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
         if epoch > 0:
             T[epoch] = time() - tic
 
+        model.train(False)
+        
         test_loss = 0.0
         if test_loader is not None:
-            with torch.no_grad():
-                for batchnum, batch in enumerate(test_loader):
-                    input = batch[0].to(device)
-                    target = batch[1].to(device)
-                    test_loss += lossfun(model(input), target)
-                test_loss /= batchnum
+            for batchnum, batch in enumerate(test_loader):
+                input = batch[0].to(device)
+                target = batch[1].to(device)
+                test_loss += lossfun(model(input), target)
+            test_loss /= batchnum
 
         print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {train_loss[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}\ttest loss: {test_loss:3f}')
 

@@ -50,7 +50,7 @@ class Decorrelation(nn.Module):
         self.in_features = in_features
         self.register_buffer("weight", torch.empty(self.in_features, self.in_features, **factory_kwargs))
         self.decor_lr = decor_lr
-        self.downsample_perc = downsample__perc # only used for convlayers atm
+        self.downsample_perc = downsample__perc
 
         self.kappa = kappa
         self.full = full
@@ -63,9 +63,16 @@ class Decorrelation(nn.Module):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         """In case of node perturbation we do not need to store decor_state and can immediately update the decorrelation parameters
         """
-        self.decor_state = F.linear(input.view(len(input), -1), self.weight)
-        return self.decor_state.view(input.shape)
-    
+        if self.training:
+            if self.downsample_perc != 1.0:
+                self.decor_state = F.linear(self.downsample(input).view(-1, np.prod(input.shape[1:])), self.weight)
+                return self.decorrelate(input)
+            else:
+                self.decor_state = F.linear(input.view(len(input), -1), self.weight)
+                return self.decor_state.view(input.shape)
+        else:
+            return self.decorrelate(input)
+        
     def decorrelate(self, input: Tensor):
         """Applies the decorrelating transform. Can be overloaded in composite functions to return the decorrelating transform.
         Maps back to the original input.
@@ -152,6 +159,7 @@ class Decorrelation(nn.Module):
         else:
             return input
 
+
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
 
@@ -160,7 +168,7 @@ class DecorLinear(Decorrelation):
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(in_features, decor_lr=decor_lr, kappa=kappa, full=full, downsample__perc=downsample_perc, **factory_kwargs)
         self.linear = nn.Linear(in_features, out_features, bias=bias, **factory_kwargs)
-        
+
     def forward(self, input: Tensor) -> Tensor:
         return self.linear.forward(super().forward(input))      
     
@@ -170,8 +178,8 @@ class DecorConv2d(Decorrelation):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
-                 bias: bool = True, decor_lr: float = 0.0, kappa = 1e-3, full: bool = True, downsample_perc=1.0,
-                 device=None, dtype=None) -> None:
+                 bias: bool = True, decor_lr: float = 0.0, kappa = 1e-3, full: bool = True,
+                 downsample_perc=1.0, device=None, dtype=None) -> None:
         """
         Args:
             - in_channels: number of input channels
@@ -205,15 +213,16 @@ class DecorConv2d(Decorrelation):
                                         stride=(1, 1),
                                         padding=0,
                                         dilation=(1, 1),
-                                        bias=bias is not None, # ?
+                                        bias=bias,
                                         **factory_kwargs)
 
         self.input = None
 
     def forward(self, input: Tensor) -> Tensor:
 
-        # we store a downsampled version for input decorrelation and diagonal computation
-        self.decor_state = self.decorrelate(self.downsample(input)).reshape(-1, self.in_features)
+        if self.training:
+            # we store a downsampled version for input decorrelation and diagonal computation
+            self.decor_state = self.decorrelate(self.downsample(input)).reshape(-1, self.in_features)
 
         # efficiently combines the patch-wise R update with the convolutional W update on all data
         weight = nn.functional.conv2d(self.weight.view(self.in_features, self.in_channels, *self.kernel_size).moveaxis(0, 1),
