@@ -5,4 +5,3 @@
 - implement downsampling at level of Decorrelation (on level of patches*samples?)
 - factory kwargs for all decorrelation parameters
 - add old learning rule
-- remove bias
