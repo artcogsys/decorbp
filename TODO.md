@@ -1,7 +1,6 @@
-- Create general training code which can mix backpropagation, node perturbation and decorrelation
 - Check against Constence codebase
 - Double check data type precision
-- Create separate package for node_perturbation
-- implement downsampling at level of Decorrelation (on level of patches*samples?)
-- factory kwargs for all decorrelation parameters
 - add old learning rule
+- analyse if we should or should not rescale with larger networks
+- analyse what happens for deep networks
+- add cifar10_resnet18 training

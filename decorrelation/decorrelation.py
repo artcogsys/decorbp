@@ -97,7 +97,7 @@ class Decorrelation(nn.Module):
             v = torch.mean(c - 1.0, axis=0)
 
             # compute update; NOTE: expensive operation
-            self.weight.data -= self.decor_lr * (((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + 2 * self.kappa * v * self.weight)
+            self.weight.data -= self.decor_lr * (((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight)
 
             # compute loss; could lead to very high values if we are not careful
             return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
@@ -111,7 +111,7 @@ class Decorrelation(nn.Module):
             v = torch.mean(self.decor_state**2 - 1.0, axis=0)
 
             # compute update
-            self.weight.data -= self.decor_lr * ((1.0 - self.kappa) * L @ self.weight + 2 * self.kappa * v * self.weight)
+            self.weight.data -= self.decor_lr * ((1.0 - self.kappa) * L @ self.weight + self.kappa * 2 * v * self.weight)
 
             # compute loss
             return (1-self.kappa) * torch.sum(L*L) + self.kappa * torch.sum(v**2)
