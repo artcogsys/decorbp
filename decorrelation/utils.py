@@ -34,14 +34,14 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
 
     if decorrelate:
         decorrelators = decor_modules(model)
-        D = np.zeros((args.epochs+1, len(decorrelators)))
+        dec_loss = np.zeros((args.epochs+1, len(decorrelators)))
     else:
-        D = np.zeros(args.epochs+1)
+        dec_loss = np.zeros(args.epochs+1)
     
     train_loss = np.zeros(args.epochs+1)
     test_loss = np.zeros(args.epochs+1)
     
-    T = np.zeros(args.epochs+1)
+    wc_time = np.zeros(args.epochs+1)
     for epoch in (pbar := tqdm(range(args.epochs+1), leave=True)):
 
         model.train(True)
@@ -62,20 +62,20 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
 
             if decorrelate:
                 if epoch > 0:
-                    D[epoch,:] += decor_update(decorrelators)
+                    dec_loss[epoch,:] += decor_update(decorrelators)
                 else:
-                    D[epoch, :] += decor_loss(decorrelators)
+                    dec_loss[epoch, :] += decor_loss(decorrelators)
     
             train_loss[epoch] += loss
                    
         train_loss[epoch] /= batchnum
 
         if epoch > 0:
-            T[epoch] = time() - tic
+            wc_time[epoch] = time() - tic
 
         model.train(False)
         
-        desc = f'epoch {epoch:<3} train: {train_loss[epoch]:5.3} decor: {np.mean(D[epoch]):5.3}'
+        desc = f'epoch {epoch:<3} train: {train_loss[epoch]:5.3} decor: {np.mean(dec_loss[epoch]):5.3}'
 
         if test_loader is not None:
             for batchnum, batch in enumerate(test_loader):
@@ -89,4 +89,4 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
 
         # pbar.set_description(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\ttrain loss: {train_loss[epoch]:<3}\tdecorrelation loss: {np.mean(D[epoch]):3f}\ttest loss: {test_loss:3f}')
 
-    return model, train_loss, test_loss, D, T
+    return model, train_loss, test_loss, dec_loss, wc_time
