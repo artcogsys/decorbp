@@ -43,9 +43,9 @@ if __name__ == '__main__':
             print('Decorrelated BP:')
             tic=time.time()
             res = decor_train(args, model, lossfun, train_loader=train_loader, test_loader=test_loader, device=device, decorrelate=True)
-            print(f'time: {time.time() - tic:.2} s')
+            print(f'time: {time.time() - tic:.3} s')
         else:
             print('Regular BP:')
             tic=time.time()
             res = decor_train(args, model, lossfun, train_loader=train_loader, test_loader=test_loader, device=device, decorrelate=False)
-            print(f'time: {time.time() - tic:.2} s')
+            print(f'time: {time.time() - tic:.3} s')
