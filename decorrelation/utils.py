@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from decorrelation.decorrelation import decor_modules, decor_update, decor_loss #, covariance
 from time import time
-from node_perturbation.node_perturbation import np_update
+from tqdm.auto import tqdm
 
 def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
     """Generate correlated data (ugly solution; we could use vines)
@@ -34,13 +34,15 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
 
     if decorrelate:
         decorrelators = decor_modules(model)
-        D = np.zeros((args.epochs+1, len(decorrelators))) # decorrelation loss
+        D = np.zeros((args.epochs+1, len(decorrelators)))
     else:
-        D = np.zeros(args.epochs+1) # decorrelation loss
+        D = np.zeros(args.epochs+1)
     
-    train_loss = np.zeros(args.epochs+1) # loss
-    T = np.zeros(args.epochs+1) # time per train epoch
-    for epoch in range(args.epochs+1):
+    train_loss = np.zeros(args.epochs+1)
+    test_loss = np.zeros(args.epochs+1)
+    
+    T = np.zeros(args.epochs+1)
+    for epoch in (pbar := tqdm(range(args.epochs+1), leave=True)):
 
         model.train(True)
 
@@ -73,14 +75,18 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
 
         model.train(False)
         
-        test_loss = 0.0
+        desc = f'epoch {epoch:<3} train: {train_loss[epoch]:5.3} decor: {np.mean(D[epoch]):5.3}'
+
         if test_loader is not None:
             for batchnum, batch in enumerate(test_loader):
                 input = batch[0].to(device)
                 target = batch[1].to(device)
-                test_loss += lossfun(model(input), target)
-            test_loss /= batchnum
+                test_loss[epoch] += lossfun(model(input), target)
+            test_loss[epoch] /= batchnum
+            desc += f' test: {test_loss[epoch]:5.3}'
 
-        print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {train_loss[epoch]:3f}\tdecorrelation loss: {np.mean(D[epoch]):3f}\ttest loss: {test_loss:3f}')
+        pbar.set_description(desc)
+
+        # pbar.set_description(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\ttrain loss: {train_loss[epoch]:<3}\tdecorrelation loss: {np.mean(D[epoch]):3f}\ttest loss: {test_loss:3f}')
 
     return model, train_loss, test_loss, D, T

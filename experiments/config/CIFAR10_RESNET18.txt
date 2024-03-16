@@ -1,10 +1,8 @@
 --epochs=20
---batch_size=64
+--batch_size=128
 --num_workers=0
 --experiment=CIFAR10_RESNET18
 --data_path=~/Data
---train_samples=1000
---test_samples=1000
 --lr=1e-4
 --decor_lr=1e-2
 --kappa=1e-2
