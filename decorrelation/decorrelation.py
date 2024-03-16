@@ -53,7 +53,7 @@ class Decorrelation(nn.Module):
         self.decor_lr = decor_lr
         self.downsample_perc = downsample__perc
 
-        self.optimizer = torch.optim.SGD([self.weight], lr=decor_lr, momentum=1e-2, dampening=0, weight_decay=0, nesterov=True)
+        # self.optimizer = torch.optim.SGD([self.weight], lr=decor_lr, momentum=1e-2, dampening=0, weight_decay=0, nesterov=True)
 
         self.kappa = kappa
         self.full = full
@@ -100,10 +100,11 @@ class Decorrelation(nn.Module):
             v = torch.mean(c - 1.0, axis=0)
 
             # compute update; NOTE: expensive operation
-            # self.weight.data -= self.decor_lr * (((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight)
+            self.weight.data -= self.decor_lr * (((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight)
 
-            self.weight.grad = ((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight
-            self.optimizer.step()
+            # in case we want to use an optimizer; NOTE: this did not help convergence in our experiments
+            # self.weight.grad = ((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight
+            # self.optimizer.step()
 
             # original decorrelation rule
             # self.weight.data -= self.decor_lr * C @ self.weight
