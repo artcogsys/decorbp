@@ -1,6 +1,6 @@
 - Check against Constence codebase
 - Double check data type precision
 - add old learning rule
-- analyse if we should or should not rescale with larger networks
+- analyse if we should or should not rescale with wide networks
 - analyse what happens for deep networks
 - add cifar10_resnet18 training

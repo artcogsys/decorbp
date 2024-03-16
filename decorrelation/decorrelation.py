@@ -12,19 +12,19 @@ def decor_modules(model: nn.Module):
     return list(filter(lambda m: isinstance(m, Decorrelation), model.modules()))
 
 def decor_update(modules):
-    """Updates all decorrelation modules and returns decorrelation loss
+    """Updates all decorrelation modules and returns decorrelation loss per decorrelation module
     """
-    loss = 0.0
-    for m in modules:
-        loss += m.update()
+    loss = np.zeros(len(modules))
+    for i, m in enumerate(modules):
+        loss[i] = m.update().detach().numpy()
     return loss
 
 def decor_loss(modules):
     """Returns decorrelation loss
     """
-    loss = 0.0
-    for m in modules:
-        loss += m.loss()
+    loss = np.zeros(len(modules))
+    for i, m in enumerate(modules):
+        loss[i] = m.loss().detach().numpy()
     return loss
 
 def lower_triangular(C: Tensor, offset: int):

@@ -34,9 +34,11 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
 
     if decorrelate:
         decorrelators = decor_modules(model)
+        D = np.zeros((args.epochs+1, len(decorrelators))) # decorrelation loss
+    else:
+        D = np.zeros(args.epochs+1) # decorrelation loss
     
     train_loss = np.zeros(args.epochs+1) # loss
-    D = np.zeros(args.epochs+1) # decorrelation loss
     T = np.zeros(args.epochs+1) # time per train epoch
     for epoch in range(args.epochs+1):
 
@@ -58,9 +60,9 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
 
             if decorrelate:
                 if epoch > 0:
-                    D[epoch] += decor_update(decorrelators)
+                    D[epoch,:] += decor_update(decorrelators)
                 else:
-                    D[epoch] += decor_loss(decorrelators)
+                    D[epoch, :] += decor_loss(decorrelators)
     
             train_loss[epoch] += loss
                    
@@ -79,6 +81,6 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
                 test_loss += lossfun(model(input), target)
             test_loss /= batchnum
 
-        print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {train_loss[epoch]:3f}\tdecorrelation loss: {D[epoch]:3f}\ttest loss: {test_loss:3f}')
+        print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tbp loss: {train_loss[epoch]:3f}\tdecorrelation loss: {np.sum(D[epoch]):3f}\ttest loss: {test_loss:3f}')
 
     return model, train_loss, test_loss, D, T
