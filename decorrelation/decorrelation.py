@@ -42,6 +42,7 @@ class Decorrelation(nn.Module):
             - kappa: decorrelation strength (0-1)
             - full: learn a full (True) or lower triangular (False) decorrelation matrix
             - downsample_perc: downsampling for covariance computation
+            - method (str): method for decorrelation updating ('weighted', 'decorrelation', 'whitening'):
         """
 
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -85,19 +86,25 @@ class Decorrelation(nn.Module):
         if self.full: # learn full R
 
             # covariance without diagonal; NOTE: expensive operation
-            C = self.decor_state.T @ self.decor_state / len(self.decor_state)
+            X = self.decor_state.T @ self.decor_state / len(self.decor_state)
 
             # variance terms
-            c = torch.diag(C)
+            c = torch.diag(X)
 
             # remove diagonal
-            C -= torch.diag(c)
+            C = X - torch.diag(c)
 
             # unit variance term averaged over datapoints
             v = torch.mean(c - 1.0, axis=0)
 
             # compute update; NOTE: expensive operation
             self.weight.data -= self.decor_lr * (((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight)
+
+            # original decorrelation rule
+            # self.weight.data -= self.decor_lr * C @ self.weight
+
+            # original whitening rule
+            # self.weight.data -= self.decor_lr * (X - torch.eye(self.in_features, device=X.device)) @ self.weight
 
             # compute loss; could lead to very high values if we are not careful
             return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
