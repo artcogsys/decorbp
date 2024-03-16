@@ -73,7 +73,7 @@ def np_train(args, model, lossfun, train_loader, test_loader=None, device=None, 
                         test_loss += lossfun(model(input), target)
                     test_loss /= batchnum
 
-            print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tnp loss: {train_loss[epoch]:3f}\tdecorrelation loss: {np.sum(D[epoch]):3f}\ttest loss: {test_loss:3f}')
+            print(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\tnp loss: {train_loss[epoch]:3f}\tdecorrelation loss: {np.mean(D[epoch]):3f}\ttest loss: {test_loss:3f}')
 
     return model, train_loss, D, T
 
