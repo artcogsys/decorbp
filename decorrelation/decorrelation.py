@@ -191,6 +191,7 @@ class DecorConv2d(Decorrelation):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
+                 decor_dilation: _size_2_t = 1, # New parameter for decorrelation dilation
                  bias: bool = True, decor_lr: float = 0.0, kappa = 1e-3, full: bool = True,
                  downsample_perc=1.0, device=None, dtype=None) -> None:
         """
@@ -201,6 +202,7 @@ class DecorConv2d(Decorrelation):
             - stride: stride of the convolution
             - padding: zero-padding added to both sides of the input
             - dilation: spacing between kernel elements
+            - decor_dilation: dilation arg for decor operation
             - bias: whether to add a learnable bias to the output
             - decor_lr: decorrelation learning rate
             - kappa: decorrelation strength (0-1)
@@ -218,6 +220,7 @@ class DecorConv2d(Decorrelation):
         self.stride = stride
         self.padding = padding
         self.dilation = dilation
+        self.decor_dilation = decor_dilation
 
         # this applies the kernel weights
         self.forward_conv = nn.Conv2d(in_channels=self.in_features,
@@ -225,7 +228,7 @@ class DecorConv2d(Decorrelation):
                                         kernel_size=(1, 1),
                                         stride=(1, 1),
                                         padding=0,
-                                        dilation=(1, 1),
+                                        dilation=self.dilation,
                                         bias=bias,
                                         **factory_kwargs)
 
@@ -259,7 +262,7 @@ class DecorConv2d(Decorrelation):
         """
         return nn.functional.conv2d(input, self.weight.view(self.in_features, self.in_channels, *self.kernel_size),
                                     bias=None, stride=self.stride, padding=self.padding, 
-                                    dilation=self.dilation).moveaxis(1, 3)
+                                    dilation=self.decor_dilation).moveaxis(1, 3)
         
     # def patches(self, input: Tensor):
     #     """Returns the input patches via an identity mapping"""

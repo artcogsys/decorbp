@@ -1,4 +1,5 @@
 import torch
+from torchvision import models
 import numpy as np
 from models import *
 from data import *
@@ -73,7 +74,8 @@ def bp2decor(model, **kwargs):
 
 if __name__ == '__main__':   
     # test functionality
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18')
+    # model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18')
+    model = models.segmentation.deeplabv3_resnet50(weights=False, num_classes=21)
     decor_model = bp2decor(model, decor_lr=0.1, kappa=1e-3)
     print(decor_model)
 
