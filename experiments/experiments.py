@@ -1,8 +1,8 @@
 import torch
 from torchvision import models
 import numpy as np
-from models import *
-from data import *
+from pylearn.experiments.models import *
+from pylearn.experiments.data import *
 
 def get_experiment(args, device):
     """
