@@ -1,3 +1,5 @@
+Authors: Marcel van Gerven, Nasir Ahmad, Sander Dalm
+
 This repository implements decorrelated backpropagation and node perturbation.
 
 ## Decorrelated backpropagation
