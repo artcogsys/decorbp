@@ -42,7 +42,7 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
     test_loss = np.zeros(args.epochs+1)
     
     wc_time = np.zeros(args.epochs+1)
-    for epoch in (pbar := tqdm(range(args.epochs+1), leave=True)):
+    for epoch in range(args.epochs+1): #(pbar := tqdm(range(args.epochs+1), leave=True)):
 
         model.train(True)
 
@@ -85,7 +85,8 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
             test_loss[epoch] /= batchnum
             desc += f' test: {test_loss[epoch]:5.3}'
 
-        pbar.set_description(desc)
+        # pbar.set_description(desc)
+        print(desc)
 
         # pbar.set_description(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\ttrain loss: {train_loss[epoch]:<3}\tdecorrelation loss: {np.mean(D[epoch]):3f}\ttest loss: {test_loss:3f}')
 

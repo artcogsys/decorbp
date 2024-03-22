@@ -9,3 +9,4 @@
 --decor_lr=1e-2
 --kappa=0.5
 --downsample_perc=0.1
+--method=normalized

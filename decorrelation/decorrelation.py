@@ -35,14 +35,17 @@ def lower_triangular(C: Tensor, offset: int):
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
-    def __init__(self, in_features: int, decor_lr: float = 0.0, kappa: float = 1e-3, full=True, downsample__perc: float = 1.0, device = None, dtype = None) -> None:
+    def __init__(self, in_features: int, method: str = 'standard', decor_lr: float = 0.0, kappa: float = 0.5, full=True, downsample__perc: float = 1.0, device = None, dtype = None) -> None:
         """"Params:
             - in_features: input dimensionality
+            - method: method for decorrelation: default is 'standard' with kappa=0.5 (original whitening inducing approach)
+                - 'standard' (original approach weighting between decorrelation and whitening using kappa
+                    (kappa=0 is pure decorrelation; kappa=1 is pure variance normalising; kappa=0.5 is original balancel 0 < kappa < 1 is whitening inducing)
+                - 'normalized' (weighted approach normalized by input size)
             - decor_lr: decorrrelation learning rate
             - kappa: decorrelation strength (0-1)
             - full: learn a full (True) or lower triangular (False) decorrelation matrix
             - downsample_perc: downsampling for covariance computation
-            - method (str): method for decorrelation updating ('weighted', 'decorrelation', 'whitening'):
         """
 
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -52,6 +55,7 @@ class Decorrelation(nn.Module):
         self.register_buffer("weight", torch.empty(self.in_features, self.in_features, **factory_kwargs))
         self.decor_lr = decor_lr
         self.downsample_perc = downsample__perc
+        self.method = method
 
         # self.optimizer = torch.optim.SGD([self.weight], lr=decor_lr, momentum=1e-2, dampening=0, weight_decay=0, nesterov=True)
 
@@ -82,82 +86,100 @@ class Decorrelation(nn.Module):
         """
         return F.linear(input.view(len(input), -1), self.weight).view(input.shape)
 
-    def update(self):
-        """Implements decorrelation update"""
+    def update(self, loss_only=False):
+        """Implements decorrelation update
+        Args:
+            - loss_only: if True, only the loss is computed and returned
+        """
 
-        if self.full: # learn full R
+        # if self.full: # learn full R
 
-            # covariance without diagonal; NOTE: expensive operation
-            X = self.decor_state.T @ self.decor_state / len(self.decor_state)
-
-            # variance terms
-            c = torch.diag(X)
-
-            # remove diagonal
-            C = X - torch.diag(c)
-
-            # unit variance term averaged over datapoints
-            v = torch.mean(c - 1.0, axis=0)
-
-            # compute update; NOTE: expensive operation
-            self.weight.data -= self.decor_lr * (((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight)
-
-            # in case we want to use an optimizer; NOTE: this did not help convergence in our experiments
-            # self.weight.grad = ((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight
-            # self.optimizer.step()
-
-            # original decorrelation rule
-            # self.weight.data -= self.decor_lr * C @ self.weight
-
-            # original whitening rule
-            # self.weight.data -= self.decor_lr * (X - torch.eye(self.in_features, device=X.device)) @ self.weight
-
-            # compute loss; could lead to very high values if we are not careful
-            return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
-        
-        else: # learn lower triangular R
-
+        if self.full:
+            # covariance; NOTE: expensive operation
+            C = self.decor_state.T @ self.decor_state / len(self.decor_state) - torch.diag(torch.mean(self.decor_state**2, axis=0))
+        else:
             # strictly lower triangular part of x x' averaged over datapoints and normalized by square root of number of non-zero entries
-            L = torch.sqrt(torch.arange(self.in_features)) * torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
+            C = torch.sqrt(torch.arange(self.in_features)) * torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
+
+        # # variance terms
+        # c = torch.diag(X)
+
+        # # remove diagonal
+        # C = X - torch.diag(c)
+
+        # unit variance term averaged over datapoints
+        # v = torch.mean(c - 1.0, axis=0)
+
+        # unit variance term averaged over datapoints
+        v = torch.mean(self.decor_state**2 - 1.0, axis=0)
+
+        match self.method:
+
+            case 'standard':
+
+                # original decorrelation rule
+                if not loss_only:
+                    self.weight.data -= self.decor_lr * (1.0 - self.kappa) * C @ self.weight + self.kappa * v * self.weight
+
+                # compute loss; could lead to very high values if we are not careful
+                return (1-self.kappa) * torch.sum(C**2) + self.kappa * torch.sum(v**2)
+
+            case 'normalized':
+
+                # compute update; NOTE: expensive operation
+                if not loss_only:
+                    self.weight.data -= self.decor_lr * (((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight)
+
+                # compute loss; could lead to very high values if we are not careful
+                return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
+
+            case _:
+                raise ValueError(f"Unknown method: {self.method}")
         
-            # unit variance term averaged over datapoints
-            v = torch.mean(self.decor_state**2 - 1.0, axis=0)
+        # else: # learn lower triangular R
 
-            # compute update
-            self.weight.data -= self.decor_lr * ((1.0 - self.kappa) * L @ self.weight + self.kappa * 2 * v * self.weight)
+        #     # strictly lower triangular part of x x' averaged over datapoints and normalized by square root of number of non-zero entries
+        #     L = torch.sqrt(torch.arange(self.in_features)) * torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
+        
+        #     # unit variance term averaged over datapoints
+        #     v = torch.mean(self.decor_state**2 - 1.0, axis=0)
 
-            # compute loss
-            return (1-self.kappa) * torch.sum(L*L) + self.kappa * torch.sum(v**2)
+        #     # compute update
+        #     self.weight.data -= self.decor_lr * ((1.0 - self.kappa) * L @ self.weight + self.kappa * 2 * v * self.weight)
+
+        #     # compute loss
+        #     return (1-self.kappa) * torch.sum(L*L) + self.kappa * torch.sum(v**2)
         
     def loss(self):
+        return self.update(loss_only=True)
 
-        if self.full: # learn full R
+        # if self.full: # learn full R
 
-            # covariance without diagonal; NOTE: expensive operation
-            C = self.decor_state.T @ self.decor_state / len(self.decor_state)
+        #     # covariance without diagonal; NOTE: expensive operation
+        #     C = self.decor_state.T @ self.decor_state / len(self.decor_state)
 
-            # variance terms
-            c = torch.diag(C)
+        #     # variance terms
+        #     c = torch.diag(C)
 
-            # remove diagonal
-            C -= torch.diag(c)
+        #     # remove diagonal
+        #     C -= torch.diag(c)
                             
-            # unit variance term averaged over datapoints
-            v = torch.mean(c - 1.0, axis=0)
+        #     # unit variance term averaged over datapoints
+        #     v = torch.mean(c - 1.0, axis=0)
 
-            # compute loss
-            return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
+        #     # compute loss
+        #     return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
         
-        else: # learn lower triangular R
+        # else: # learn lower triangular R
 
-            # strictly lower triangular part of x x' averaged over datapoints and normalized by square root of number of non-zero entries
-            L = torch.sqrt(torch.arange(self.in_features)) * torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
+        #     # strictly lower triangular part of x x' averaged over datapoints and normalized by square root of number of non-zero entries
+        #     L = torch.sqrt(torch.arange(self.in_features)) * torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
         
-            # unit variance term averaged over datapoints
-            v = torch.mean(self.decor_state**2 - 1.0, axis=0)
+        #     # unit variance term averaged over datapoints
+        #     v = torch.mean(self.decor_state**2 - 1.0, axis=0)
 
-            # compute loss
-            return (1-self.kappa) * torch.sum(L*L) + self.kappa * torch.sum(v**2)
+        #     # compute loss
+        #     return (1-self.kappa) * torch.sum(L*L) + self.kappa * torch.sum(v**2)
 
     def downsample(self, input: Tensor):
         """Downsamples the input for covariance computation"""
@@ -176,10 +198,10 @@ class Decorrelation(nn.Module):
 class DecorLinear(Decorrelation):
     """Linear layer with input decorrelation"""
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, decor_lr: float = 0.0,
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, method: str = 'standard', decor_lr: float = 0.0,
                  kappa = 1e-3, full: bool = True, downsample_perc:float =1.0, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__(in_features, decor_lr=decor_lr, kappa=kappa, full=full, downsample__perc=downsample_perc, **factory_kwargs)
+        super().__init__(in_features, method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample__perc=downsample_perc, **factory_kwargs)
         self.linear = nn.Linear(in_features, out_features, bias=bias, **factory_kwargs)
 
     def forward(self, input: Tensor) -> Tensor:
@@ -191,7 +213,7 @@ class DecorConv2d(Decorrelation):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
-                 bias: bool = True, decor_lr: float = 0.0, kappa = 1e-3, full: bool = True,
+                 bias: bool = True, method: str = 'standard', decor_lr: float = 0.0, kappa = 1e-3, full: bool = True,
                  downsample_perc=1.0, device=None, dtype=None) -> None:
         """
         Args:
@@ -202,6 +224,7 @@ class DecorConv2d(Decorrelation):
             - padding: zero-padding added to both sides of the input
             - dilation: spacing between kernel elements
             - bias: whether to add a learnable bias to the output
+            - method: decorrelation method
             - decor_lr: decorrelation learning rate
             - kappa: decorrelation strength (0-1)
             - full: learn a full (True) or lower triangular (False) decorrelation matrix
@@ -211,7 +234,7 @@ class DecorConv2d(Decorrelation):
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(in_features=in_channels * np.prod(kernel_size), decor_lr=decor_lr, kappa=kappa, full=full, downsample__perc=downsample_perc, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample__perc=downsample_perc, **factory_kwargs)        
         
         self.in_channels = in_channels
         self.kernel_size = kernel_size

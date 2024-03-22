@@ -22,6 +22,7 @@ def parse_arguments():
     parser.add_argument('--decor_lr', default=1e-4, type=float, help="decorrelation update strength") 
     parser.add_argument('--kappa', default=1e-3, type=float, help="strenght of unit variance constraint [0-1]") 
     parser.add_argument('--downsample_perc', default=1.0, type=float, help="downsampling for covariance computation") 
+    parser.add_argument('--method', default='standard', type=str, help="method used for decorrelation (standard vs normalized)") 
     
     return parser.parse_args()
 
