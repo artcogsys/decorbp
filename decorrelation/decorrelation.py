@@ -92,23 +92,15 @@ class Decorrelation(nn.Module):
             - loss_only: if True, only the loss is computed and returned
         """
 
-        # if self.full: # learn full R
+        # covariance; NOTE: expensive operation
+        X = self.decor_state.T @ self.decor_state / len(self.decor_state)
 
         if self.full:
-            # covariance; NOTE: expensive operation
-            C = self.decor_state.T @ self.decor_state / len(self.decor_state) - torch.diag(torch.mean(self.decor_state**2, axis=0))
+            # remove diagonal
+            C = X - torch.diag(torch.diag(X))
         else:
             # strictly lower triangular part of x x' averaged over datapoints and normalized by square root of number of non-zero entries
-            C = torch.sqrt(torch.arange(self.in_features)) * torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
-
-        # # variance terms
-        # c = torch.diag(X)
-
-        # # remove diagonal
-        # C = X - torch.diag(c)
-
-        # unit variance term averaged over datapoints
-        # v = torch.mean(c - 1.0, axis=0)
+            C = torch.sqrt(torch.arange(self.in_features)) * torch.tril(X, diagonal=-1)
 
         # unit variance term averaged over datapoints
         v = torch.mean(self.decor_state**2 - 1.0, axis=0)
@@ -119,10 +111,10 @@ class Decorrelation(nn.Module):
 
                 # original decorrelation rule
                 if not loss_only:
-                    self.weight.data -= self.decor_lr * (1.0 - self.kappa) * C @ self.weight + self.kappa * v * self.weight
+                    self.weight.data -= self.decor_lr * ((1.0 - self.kappa) * C @ self.weight + self.kappa * v * self.weight)
 
-                # compute loss; could lead to very high values if we are not careful
-                return (1-self.kappa) * torch.sum(C**2) + self.kappa * torch.sum(v**2)
+                # compute loss; we divide by the number of matrix elements
+                return ((1-self.kappa) * torch.sum(C**2) + self.kappa * torch.sum(v**2)) / self.in_features**2
 
             case 'normalized':
 
@@ -130,7 +122,7 @@ class Decorrelation(nn.Module):
                 if not loss_only:
                     self.weight.data -= self.decor_lr * (((1.0 - self.kappa)/(self.in_features-1)) * C @ self.weight + self.kappa * 2 * v * self.weight)
 
-                # compute loss; could lead to very high values if we are not careful
+                # compute loss
                 return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
 
             case _:
@@ -152,34 +144,6 @@ class Decorrelation(nn.Module):
         
     def loss(self):
         return self.update(loss_only=True)
-
-        # if self.full: # learn full R
-
-        #     # covariance without diagonal; NOTE: expensive operation
-        #     C = self.decor_state.T @ self.decor_state / len(self.decor_state)
-
-        #     # variance terms
-        #     c = torch.diag(C)
-
-        #     # remove diagonal
-        #     C -= torch.diag(c)
-                            
-        #     # unit variance term averaged over datapoints
-        #     v = torch.mean(c - 1.0, axis=0)
-
-        #     # compute loss
-        #     return (1/self.in_features) * (((1-self.kappa)/(self.in_features-1)) * torch.sum(C**2) + self.kappa * torch.sum(v**2))
-        
-        # else: # learn lower triangular R
-
-        #     # strictly lower triangular part of x x' averaged over datapoints and normalized by square root of number of non-zero entries
-        #     L = torch.sqrt(torch.arange(self.in_features)) * torch.tril(self.decor_state.T @ self.decor_state, diagonal=-1) / len(self.decor_state)
-        
-        #     # unit variance term averaged over datapoints
-        #     v = torch.mean(self.decor_state**2 - 1.0, axis=0)
-
-        #     # compute loss
-        #     return (1-self.kappa) * torch.sum(L*L) + self.kappa * torch.sum(v**2)
 
     def downsample(self, input: Tensor):
         """Downsamples the input for covariance computation"""

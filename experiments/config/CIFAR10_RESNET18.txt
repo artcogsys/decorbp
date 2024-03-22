@@ -4,7 +4,7 @@
 --experiment=CIFAR10_RESNET18
 --data_path=~/Data
 --lr=1e-4
---decor_lr=1e-2
---kappa=1e-2
+--decor_lr=1e-4
+--kappa=0.01
 --downsample_perc=0.1
---method=normalized
+--method=standard

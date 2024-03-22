@@ -5,8 +5,8 @@
 --data_path=~/Data
 --train_samples=1000
 --test_samples=1000
---lr=1e-5
---decor_lr=1e-2
---kappa=0.5
+--lr=1e-3
+--decor_lr=1e-4
+--kappa=0.01
 --downsample_perc=0.1
---method=normalized
+--method=standard
