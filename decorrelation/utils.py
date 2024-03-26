@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from decorrelation.decorrelation import decor_modules, decor_update, decor_loss #, covariance
+from pylearn.decorrelation.decorrelation import decor_modules, decor_update, decor_loss #, covariance
 from time import time
 
 def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
