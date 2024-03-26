@@ -16,7 +16,7 @@ def decor_update(modules):
     """
     loss = np.zeros(len(modules))
     for i, m in enumerate(modules):
-        loss[i] = m.update().detach().numpy()
+        loss[i] = m.update().cpu().detach().numpy()
     return loss
 
 def decor_loss(modules):
@@ -24,7 +24,7 @@ def decor_loss(modules):
     """
     loss = np.zeros(len(modules))
     for i, m in enumerate(modules):
-        loss[i] = m.loss().detach().numpy()
+        loss[i] = m.loss().cpu().detach().numpy()
     return loss
 
 def lower_triangular(C: Tensor, offset: int):
