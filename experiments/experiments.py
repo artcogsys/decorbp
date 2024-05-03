@@ -65,7 +65,7 @@ def bp2decor(model, **kwargs):
             elif isinstance(layer, nn.BatchNorm2d):
                 module.__setattr__(name, nn.Identity())
             elif layer.children() is not None:
-                _replace_modules(layer)
+                _replace_modules(layer, **kwargs)
 
     _replace_modules(model, **kwargs)
 

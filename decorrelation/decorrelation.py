@@ -35,7 +35,7 @@ def lower_triangular(C: Tensor, offset: int):
 class Decorrelation(nn.Module):
     """A Decorrelation layer flattens the input, decorrelates, updates decorrelation parameters, and returns the reshaped decorrelated input"""
 
-    def __init__(self, in_features: int, method: str = 'standard', decor_lr: float = 0.0, kappa: float = 0.5, full=True, downsample__perc: float = 1.0, device = None, dtype = None) -> None:
+    def __init__(self, in_features: int, method: str = 'standard', decor_lr: float = 0.0, kappa: float = 0.5, full=True, downsample_perc: float = 1.0, device = None, dtype = None) -> None:
         """"Params:
             - in_features: input dimensionality
             - method: method for decorrelation: default is 'standard' with kappa=0.5 (original whitening inducing approach)
@@ -54,7 +54,7 @@ class Decorrelation(nn.Module):
         self.in_features = in_features
         self.register_buffer("weight", torch.empty(self.in_features, self.in_features, **factory_kwargs))
         self.decor_lr = decor_lr
-        self.downsample_perc = downsample__perc
+        self.downsample_perc = downsample_perc
         self.method = method
 
         # self.optimizer = torch.optim.SGD([self.weight], lr=decor_lr, momentum=1e-2, dampening=0, weight_decay=0, nesterov=True)
@@ -165,7 +165,7 @@ class DecorLinear(Decorrelation):
     def __init__(self, in_features: int, out_features: int, bias: bool = True, method: str = 'standard', decor_lr: float = 0.0,
                  kappa = 1e-3, full: bool = True, downsample_perc:float =1.0, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__(in_features, method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample__perc=downsample_perc, **factory_kwargs)
+        super().__init__(in_features, method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample_perc=downsample_perc, **factory_kwargs)
         self.linear = nn.Linear(in_features, out_features, bias=bias, **factory_kwargs)
 
     def forward(self, input: Tensor) -> Tensor:
@@ -200,7 +200,7 @@ class DecorConv2d(Decorrelation):
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         # define decorrelation layer
-        super().__init__(in_features=in_channels * np.prod(kernel_size), method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample__perc=downsample_perc, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample_perc=downsample_perc, **factory_kwargs)        
         
         self.in_channels = in_channels
         self.kernel_size = kernel_size
