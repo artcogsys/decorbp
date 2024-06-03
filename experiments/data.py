@@ -25,7 +25,7 @@ def get_MNIST(args):
     if args.test_samples == 0:
         test_loader = None
     else:
-        test_data = MNIST(root=args.data_path, train=True, download=True, transform=transform)
+        test_data = MNIST(root=args.data_path, train=False, download=True, transform=transform)
 
         if args.test_samples != -1:
             test_data = Subset(test_data, np.random.permutation(len(test_data.data))[:args.test_samples])
