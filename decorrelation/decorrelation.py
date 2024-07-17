@@ -183,10 +183,8 @@ class DecorConv2d(Decorrelation):
             - downsample_perc: downsampling for covariance computation
         """
 
-        factory_kwargs = {'device': device, 'dtype': dtype}
-
         # define decorrelation layer
-        super().__init__(in_features=in_channels * np.prod(kernel_size), method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample_perc=downsample_perc, **factory_kwargs)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample_perc=downsample_perc, device=device, dtype=dtype)        
         
         self.in_channels = in_channels
         self.kernel_size = kernel_size
@@ -202,7 +200,8 @@ class DecorConv2d(Decorrelation):
                                         padding=0,
                                         dilation=(1, 1),
                                         bias=bias,
-                                        **factory_kwargs)
+                                        device=device,
+                                        dtype=dtype)
 
         self.input = None
 
