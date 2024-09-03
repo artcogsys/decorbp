@@ -234,3 +234,79 @@ class DecorConv2d(Decorrelation):
         return nn.functional.conv2d(input, self.weight.view(self.in_features, self.in_channels, *self.kernel_size),
                                     bias=None, stride=self.stride, padding=self.padding, 
                                     dilation=self.dilation).moveaxis(1, 3)
+    
+class DecorConvTranspose2d(Decorrelation):
+    """2d transposed convolution with input decorrelation"""
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
+                 stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
+                 bias: bool = True, method: str = 'standard', decor_lr: float = 0.0, kappa = 1e-3, full: bool = True,
+                 downsample_perc=1.0, device=None, dtype=None) -> None:
+        """
+        Args:
+            - in_channels: number of input channels
+            - out_channels: number of output channels
+            - kernel_size: size of the convolving kernel
+            - stride: stride of the convolution
+            - padding: zero-padding added to both sides of the input
+            - dilation: spacing between kernel elements
+            - decor_dilation: dilation arg for decor operation
+            - bias: whether to add a learnable bias to the output
+            - method: decorrelation method
+            - decor_lr: decorrelation learning rate
+            - kappa: decorrelation strength (0-1)
+            - full: learn a full (True) or lower triangular (False) decorrelation matrix
+            - downsample_perc: downsampling for covariance computation
+        """
+
+        # define decorrelation layer
+        super().__init__(in_features=in_channels * np.prod(kernel_size), method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample_perc=downsample_perc, device=device, dtype=dtype)        
+        
+        self.in_channels = in_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+
+        # this applies the kernel weights
+        self.forward_conv_transpose = nn.ConvTranspose2d(in_channels=self.in_features,
+                                        out_channels=out_channels,
+                                        kernel_size=(1, 1),
+                                        stride=(1, 1),
+                                        padding=0,
+                                        dilation=(1, 1),
+                                        bias=bias,
+                                        device=device,
+                                        dtype=dtype)
+
+        self.input = None
+
+    def forward(self, input: Tensor) -> Tensor:
+
+        if self.training:
+            # we store a downsampled version for input decorrelation and diagonal computation
+            self.decor_state = self.decorrelate(self.downsample(input)).reshape(-1, self.in_features)
+
+        # efficiently combines the patch-wise R update with the convolutional W update on all data
+        weight = nn.functional.conv_transpose2d(self.weight.view(self.in_features, self.in_channels, *self.kernel_size).moveaxis(0, 1),
+                                      self.forward_conv_transpose.weight,
+                                      padding=0)
+                
+        # applies the combined weight to the non-downsampled input to generate the desired output
+        self.forward_conv_transpose.output = nn.functional.conv_transpose2d(input, weight,
+                                         stride=self.stride,
+                                         dilation=self.dilation,
+                                         padding=self.padding)
+
+        # needed for BP gradient propagation
+        self.forward_conv_transpose.output.requires_grad_(True)
+        self.forward_conv_transpose.output.retain_grad()
+        
+        return self.forward_conv_transpose.output
+    
+    def decorrelate(self, input: Tensor):
+        """Applies the patchwise decorrelating transform and returns decorrelated feature maps
+        """
+        return nn.functional.conv_transpose2d(input, self.weight.view(self.in_channels, self.in_features, *self.kernel_size),
+                                    bias=None, stride=self.stride, padding=self.padding, 
+                                    dilation=self.dilation).moveaxis(1, 3)
