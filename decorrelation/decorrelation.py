@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from torch import Tensor
 import numpy as np
 from torch.nn.common_types import _size_2_t
-import itertools
 
 def decor_modules(model: nn.Module):
     """Returns the list of decorrelation modules
@@ -244,7 +243,7 @@ class DecorConvTranspose2d(Decorrelation):
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t,
                  stride: _size_2_t = 1, padding: _size_2_t = 0, dilation: _size_2_t = 1,
                  bias: bool = True, method: str = 'standard', decor_lr: float = 0.0, kappa = 1e-3, full: bool = True,
-                 downsample_perc=1.0, device=None, dtype=None, weights=None) -> None:
+                 downsample_perc=1.0, device=None, dtype=None, weights=None, loaded_bias=None) -> None:
         """
         Args:
             - in_channels: number of input channels
@@ -273,6 +272,7 @@ class DecorConvTranspose2d(Decorrelation):
         self.dilation = dilation
         self.bias = bias
         self.loaded_weights = weights
+        self.loaded_bias = loaded_bias
 
         self.initialized = False # Flag to check if weights are initialized
 
@@ -300,10 +300,13 @@ class DecorConvTranspose2d(Decorrelation):
                 stride=self.stride,
                 padding=self.padding,
                 dilation=self.dilation,
+                bias=self.bias,
                 device = self.device,
                 dtype = self.dtype
             )
             self.forward_conv_transpose.weight.data = self.loaded_weights
+            if self.loaded_bias is not None:
+                self.forward_conv_transpose.bias.data = self.loaded_bias
         else:
             # For larger input, perform patchwise decorrelation
             self.in_features = self.in_channels * np.prod(self.kernel_size)
@@ -311,6 +314,7 @@ class DecorConvTranspose2d(Decorrelation):
             self.forward_conv_transpose = nn.ConvTranspose2d(
                 in_channels=self.out_channels,
                 out_channels=self.in_features,
+                bias=self.bias,
                 kernel_size=(1,1),  # Pointwise convolution after decorrelation
                 stride=(1,1),
                 padding=0,
@@ -319,6 +323,8 @@ class DecorConvTranspose2d(Decorrelation):
                 dtype = self.dtype
             )
             self.forward_conv_transpose.weight.data = self.loaded_weights.view(self.out_channels, self.in_features, 1, 1)
+            if self.loaded_bias is not None:
+                self.forward_conv_transpose.bias.data = self.loaded_bias
 
         # Call reset_parameters to initialize the decorrelation matrix properly
         self.reset_parameters()
