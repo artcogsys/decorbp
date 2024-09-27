@@ -102,7 +102,7 @@ class Decorrelation(nn.Module):
             C = X - torch.diag(torch.diag(X))
         else:
             # strictly lower triangular part of x x' averaged over datapoints and normalized by square root of number of non-zero entries
-            C = torch.sqrt(torch.arange(self.in_features)) * torch.tril(X, diagonal=-1)
+            C = torch.sqrt(torch.arange(self.in_features).to(self.device)) * torch.tril(X.to(self.device), diagonal=-1)
 
         # unit variance term averaged over datapoints
         v = torch.mean(self.decor_state**2 - 1.0, axis=0)
