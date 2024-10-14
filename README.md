@@ -1,4 +1,4 @@
-Authors: Marcel van Gerven, Nasir Ahmad, Sander Dalm
+Authors: Marcel van Gerven, Nasir Ahmad, Sander Dalm, Kieran Carrigg
 
 This repository implements decorrelated backpropagation. To run a model with and without backpropagation, use experiments/main in combination with a config file (experiments/config).
 
