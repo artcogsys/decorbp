@@ -43,28 +43,58 @@ def get_experiment(args, device):
 
 def bp2decor(model, **kwargs):
     """
-    replaces specific modules in model by decorrelation modules
+    Replaces specific modules in the model with decorrelation modules,
 
     Args:
-    model: nn.Module
-    kwargs: dict
-        keyword arguments for the decorrelation modules
+        model (nn.Module): The complete model.
+        kwargs (dict): Keyword arguments for the decorrelation modules.
     """
 
     def _replace_modules(module, **kwargs):
         """
-        replaces specific modules in model by modules specified by the replacement_fn
+        Recursively replaces specific modules in the model's backbone.
+        
+        Args:
+            module (nn.Module): A module within the model, typically a submodule of the backbone.
+            kwargs (dict): Keyword arguments for the decorrelation modules.
         """
-        for name, layer in module.named_children():
+        for i, (name, layer) in enumerate(module.named_children()):
             if isinstance(layer, nn.Linear):
-                module.__setattr__(name, DecorLinear(layer.in_features, layer.out_features, bias=layer.bias is not None, **kwargs))
+                # Replace nn.Linear with DecorLinear
+                setattr(module, name, DecorLinear(
+                    layer.in_features, layer.out_features, bias=layer.bias is not None, **kwargs))
             elif isinstance(layer, nn.Conv2d):
-                module.__setattr__(name, DecorConv2d(layer.in_channels, layer.out_channels, layer.kernel_size,
-                                                     stride = layer.stride, padding=layer.padding, dilation=layer.dilation,
-                                                     bias=layer.bias is not None, **kwargs))
-            elif isinstance(layer, nn.BatchNorm2d):
-                module.__setattr__(name, nn.Identity())
-            elif layer.children() is not None:
+                # Create a new DecorConv2d layer with matching parameters
+                new_layer = DecorConv2d(
+                    layer.in_channels, layer.out_channels, layer.kernel_size,
+                    stride=layer.stride, padding=layer.padding, dilation=layer.dilation,
+                    bias=layer.bias is not None, **kwargs)
+                
+                new_shape = [layer.out_channels, layer.in_channels * layer.kernel_size[0] * layer.kernel_size[1], 1, 1]
+
+                # Transfer the weights from the original convolutional layer to the new layer's forward_conv
+                new_layer.forward_conv.weight.data = layer.weight.data.view(new_shape)
+
+                if layer.bias is not None:
+                    new_layer.forward_conv.bias.data = layer.bias.data
+                
+                setattr(module, name, new_layer)
+            elif isinstance(layer, nn.ConvTranspose2d):
+                # Create a new DecorConvTranspose2d layer with matching parameters
+                if i != 0:
+                # Omit the first layer, as in GANs this is sampled from a Gaussian distribution and does not need decorrelation.
+                    new_layer = DecorConvTranspose2d(
+                        layer.in_channels, layer.out_channels, layer.kernel_size,
+                        stride=layer.stride, padding=layer.padding, dilation=layer.dilation,
+                        bias=layer.bias is not None, weights=layer.weight.data, loaded_bias=layer.bias.data, **kwargs)
+
+                    setattr(module, name, new_layer)
+                    
+            # elif isinstance(layer, nn.BatchNorm2d) and args.batchnorm == 'remove':
+            #     # Optionally replace BatchNorm2d with nn.Identity if args.batchnorm is set to 'remove'.
+            #     setattr(module, name, nn.Identity())
+            elif hasattr(layer, 'children') and callable(layer.children):
+                # Recursively apply the same logic to child modules
                 _replace_modules(layer, **kwargs)
 
     _replace_modules(model, **kwargs)
