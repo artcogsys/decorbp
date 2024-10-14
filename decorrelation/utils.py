@@ -1,7 +1,8 @@
 import torch
 import numpy as np
-from pylearn.decorrelation.decorrelation import decor_modules, decor_update, decor_loss #, covariance
+from decorrelation.decorrelation import decor_modules, decor_update, decor_loss #, covariance
 from time import time
+from tqdm.auto import tqdm
 
 def generate_correlated_data(d, num_samples, strength=0.3, dtype=torch.float32):
     """Generate correlated data (ugly solution; we could use vines)
@@ -41,7 +42,7 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
     test_loss = np.zeros(args.epochs+1)
     
     wc_time = np.zeros(args.epochs+1)
-    for epoch in range(args.epochs+1):
+    for epoch in range(args.epochs+1): #(pbar := tqdm(range(args.epochs+1), leave=True)):
 
         model.train(True)
 
@@ -84,6 +85,9 @@ def decor_train(args, model, lossfun, train_loader, test_loader=None, device=Non
             test_loss[epoch] /= batchnum
             desc += f' test: {test_loss[epoch]:5.3}'
 
+        # pbar.set_description(desc)
         print(desc)
+
+        # pbar.set_description(f'epoch {epoch:<3}\ttime:{T[epoch]:.3f} s\ttrain loss: {train_loss[epoch]:<3}\tdecorrelation loss: {np.mean(D[epoch]):3f}\ttest loss: {test_loss:3f}')
 
     return model, train_loss, test_loss, dec_loss, wc_time
