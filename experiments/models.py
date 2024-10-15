@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from pylearn.decorrelation.decorrelation import DecorLinear, DecorConv2d
+from decorbp.decorrelation.decorrelation import DecorLinear, DecorConv2d
 
 class MLP(nn.Sequential):
     """Simple MLP example"""

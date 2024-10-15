@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import matplotlib
-from pylearn.decorrelation.decorrelation import lower_triangular, decor_modules
+from decorrelation.decorrelation import lower_triangular, decor_modules
 import numpy as np
 import torch
 
