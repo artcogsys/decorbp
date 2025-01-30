@@ -331,7 +331,7 @@ class DecorConvTranspose2d(Decorrelation):
             weights (optional): Pre-loaded weights for the layer.
             loaded_bias (optional): Pre-loaded bias for the layer.
         """
-        super().__init__(in_features=None, method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample_perc=downsample_perc, device=device, dtype=dtype)        
+        super().__init__(in_features=in_channels * np.prod(kernel_size), method=method, decor_lr=decor_lr, kappa=kappa, full=full, downsample_perc=downsample_perc, device=device, dtype=dtype)        
         
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -343,59 +343,21 @@ class DecorConvTranspose2d(Decorrelation):
         self.loaded_weights = weights
         self.loaded_bias = loaded_bias
 
-        self.initialized = False
+        self.forward_conv_transpose = nn.ConvTranspose2d(
+            in_channels=self.out_channels,
+            out_channels=self.in_features,
+            bias=self.bias,
+            kernel_size=(1,1),
+            stride=(1,1),
+            padding=0,
+            dilation=(1,1),
+            device=self.device,
+            dtype=self.dtype
+        )
 
-    def reset_parameters(self):
-        """Resets the parameters by initializing the weight matrix."""
-        if self.in_features is not None:
-            nn.init.eye_(self.weight)
-
-    def initialize_weights(self, input_shape):
-        """Initializes the weights based on input shape.
-        
-        Args:
-            input_shape (Tuple): Shape of the input tensor.
-        """
-        _, _, h, w = input_shape
-
-        if h == 1 and w == 1:
-            self.in_features = self.in_channels
-            self.register_buffer("weight", torch.empty(self.in_features, self.in_features, device=self.device, dtype=self.dtype))
-
-            self.forward_conv_transpose = nn.ConvTranspose2d(
-                in_channels=self.in_channels,
-                out_channels=self.out_channels,
-                kernel_size=self.kernel_size,
-                stride=self.stride,
-                padding=self.padding,
-                dilation=self.dilation,
-                bias=self.bias,
-                device=self.device,
-                dtype=self.dtype
-            )
-            self.forward_conv_transpose.weight.data = self.loaded_weights
-            if self.loaded_bias is not None:
-                self.forward_conv_transpose.bias.data = self.loaded_bias
-        else:
-            self.in_features = self.in_channels * np.prod(self.kernel_size)
-            self.register_buffer("weight", torch.empty(self.in_features, self.in_features, device=self.device, dtype=self.dtype))
-            self.forward_conv_transpose = nn.ConvTranspose2d(
-                in_channels=self.out_channels,
-                out_channels=self.in_features,
-                bias=self.bias,
-                kernel_size=(1,1),
-                stride=(1,1),
-                padding=0,
-                dilation=(1,1),
-                device=self.device,
-                dtype=self.dtype
-            )
-            self.forward_conv_transpose.weight.data = self.loaded_weights.view(self.out_channels, self.in_features, 1, 1)
-            if self.loaded_bias is not None:
-                self.forward_conv_transpose.bias.data = self.loaded_bias
-
-        self.reset_parameters()
-        self.initialized = True
+        self.forward_conv_transpose.weight.data = self.loaded_weights.view(self.out_channels, self.in_features, 1, 1)
+        if self.loaded_bias is not None:
+            self.forward_conv_transpose.bias.data = self.loaded_bias
 
     def forward(self, input: Tensor) -> Tensor:
         """Forward pass of the DecorConvTranspose2d layer.
@@ -406,34 +368,23 @@ class DecorConvTranspose2d(Decorrelation):
         Returns:
             Tensor: Output tensor after decorrelation and transposed convolution.
         """
-        if not self.initialized:
-            self.initialize_weights(input.shape)
 
-        if input.size(2) == 1 and input.size(3) == 1:
-            if self.training:
-                self.decor_state = F.linear(self.downsample(input).view(-1, np.prod(input.shape[1:])), self.weight)
-            self.forward_conv_transpose.output = self.forward_conv_transpose(super().decorrelate(input))
-            self.forward_conv_transpose.output.requires_grad_(True)
-            self.forward_conv_transpose.output.retain_grad()
-            return self.forward_conv_transpose.output
+        if self.training:
+            self.decor_state = self.decorrelate(self.downsample(input)).reshape(-1, self.in_features)
+
+        weight = nn.functional.conv2d(self.forward_conv_transpose.weight,
+                                        self.weight.view(self.in_features, self.in_features, 1, 1),
+                                        padding=0)
+                
+        self.forward_conv_transpose.output = nn.functional.conv_transpose2d(input, weight.reshape(self.in_channels, self.out_channels, *self.kernel_size),
+                                        stride=self.stride,
+                                        dilation=self.dilation,
+                                        padding=self.padding)
+
+        self.forward_conv_transpose.output.requires_grad_(True)
+        self.forward_conv_transpose.output.retain_grad()
         
-        else:
-            if self.training:
-                self.decor_state = self.decorrelate(self.downsample(input)).reshape(-1, self.in_features)
-
-            weight = nn.functional.conv2d(self.forward_conv_transpose.weight,
-                                          self.weight.view(self.in_features, self.in_features, 1, 1),
-                                          padding=0)
-                    
-            self.forward_conv_transpose.output = nn.functional.conv_transpose2d(input, weight.reshape(self.in_channels, self.out_channels, *self.kernel_size),
-                                            stride=self.stride,
-                                            dilation=self.dilation,
-                                            padding=self.padding)
-
-            self.forward_conv_transpose.output.requires_grad_(True)
-            self.forward_conv_transpose.output.retain_grad()
-            
-            return self.forward_conv_transpose.output
+        return self.forward_conv_transpose.output
     
     def decorrelate(self, input: Tensor):
         """Applies the patchwise decorrelating transform and returns decorrelated feature maps.
