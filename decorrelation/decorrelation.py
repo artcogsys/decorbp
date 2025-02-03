@@ -356,7 +356,7 @@ class DecorConvTranspose2d(Decorrelation):
         )
 
         self.forward_conv_transpose.weight.data = self.loaded_weights.view(self.out_channels, self.in_features, 1, 1)
-        if self.loaded_bias is not None:
+        if self.forward_conv_transpose.bias is not None:
             self.forward_conv_transpose.bias.data = self.loaded_bias
 
     def forward(self, input: Tensor) -> Tensor:
