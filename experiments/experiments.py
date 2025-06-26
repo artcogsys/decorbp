@@ -3,6 +3,7 @@ from torchvision import models
 import numpy as np
 from decorbp.experiments.models import *
 from decorbp.experiments.data import *
+from decorbp.decorrelation.decorrelation import DecorLinear, DecorConv2d, DecorConvTranspose2d
 
 def get_experiment(args, device):
     """
@@ -41,7 +42,24 @@ def get_experiment(args, device):
     return model, lossfun, train_loader, test_loader
 
 
-def bp2decor(model, **kwargs):
+def decor2bp(model):
+    def _replace_modules(module):
+        for i, (name, layer) in enumerate(module.named_children()):
+            if isinstance(layer, DecorLinear):
+                new_layer = nn.Linear(
+                    layer.linear.in_features, layer.linear.out_features, bias=layer.linear.bias is not None)
+                new_layer.weight.data = layer.linear.weight.data.view(layer.linear.out_features, layer.linear.in_features)
+                if layer.linear.bias is not None:
+                    new_layer.bias.data = layer.linear.bias.data
+                setattr(module, name, new_layer)
+            elif hasattr(layer, 'children') and callable(layer.children):
+                # Recursively apply the same logic to child modules
+                _replace_modules(layer)
+    
+    _replace_modules(model)
+    return model
+
+def bp2decor(model, skip_conv=False, **kwargs):
     """
     Replaces specific modules in the model with decorrelation modules,
 
@@ -50,7 +68,7 @@ def bp2decor(model, **kwargs):
         kwargs (dict): Keyword arguments for the decorrelation modules.
     """
 
-    def _replace_modules(module, **kwargs):
+    def _replace_modules(module, skip_conv, **kwargs):
         """
         Recursively replaces specific modules in the model's backbone.
         
@@ -59,11 +77,17 @@ def bp2decor(model, **kwargs):
             kwargs (dict): Keyword arguments for the decorrelation modules.
         """
         for i, (name, layer) in enumerate(module.named_children()):
-            if isinstance(layer, nn.Linear):
-                # Replace nn.Linear with DecorLinear
-                setattr(module, name, DecorLinear(
-                    layer.in_features, layer.out_features, bias=layer.bias is not None, **kwargs))
-            elif isinstance(layer, nn.Conv2d):
+            if isinstance(layer, nn.Linear) and name not in ('decoder_embed', 'pred'):
+                # Create a new DecorLinear layer with matching parameters
+                new_layer = DecorLinear(
+                    layer.in_features, layer.out_features, bias=layer.bias is not None, **kwargs)
+                # Transfer the weights from the original linear layer to the new layer
+                new_layer.linear.weight.data = layer.weight.data.view(layer.out_features, layer.in_features)
+                if layer.bias is not None:
+                    new_layer.linear.bias.data = layer.bias.data
+                # Replace the original layer with the new DecorLinear layer
+                setattr(module, name, new_layer)
+            elif (isinstance(layer, nn.Conv2d) and skip_conv == False):
                 # Create a new DecorConv2d layer with matching parameters
                 new_layer = DecorConv2d(
                     layer.in_channels, layer.out_channels, layer.kernel_size,
@@ -95,9 +119,9 @@ def bp2decor(model, **kwargs):
             #     setattr(module, name, nn.Identity())
             elif hasattr(layer, 'children') and callable(layer.children):
                 # Recursively apply the same logic to child modules
-                _replace_modules(layer, **kwargs)
+                _replace_modules(layer, skip_conv, **kwargs)
 
-    _replace_modules(model, **kwargs)
+    _replace_modules(model, skip_conv, **kwargs)
 
     return model
 
