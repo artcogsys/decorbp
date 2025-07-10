@@ -48,9 +48,25 @@ def decor2bp(model):
             if isinstance(layer, DecorLinear):
                 new_layer = nn.Linear(
                     layer.linear.in_features, layer.linear.out_features, bias=layer.linear.bias is not None)
-                new_layer.weight.data = layer.linear.weight.data.view(layer.linear.out_features, layer.linear.in_features)
+                new_layer.weight.data = torch.matmul(layer.linear.weight.data, layer.weight.data)
                 if layer.linear.bias is not None:
                     new_layer.bias.data = layer.linear.bias.data
+                setattr(module, name, new_layer)
+            elif isinstance(layer, DecorConv2d):
+                new_layer = nn.Conv2d(
+                    layer.in_channels, layer.forward_conv.out_channels,
+                    layer.kernel_size, stride=layer.stride,
+                    padding=layer.padding, dilation=layer.dilation,
+                    bias=layer.forward_conv.bias is not None)
+                
+                new_shape = [layer.forward_conv.out_channels, layer.in_channels, layer.kernel_size[0], layer.kernel_size[1]]
+                print(f"Replacing DecorConv2d with Conv2d: {name}, out_channels: {new_shape[0]}, in_channels: {new_shape[1]}, kernel_size: {new_shape[2]},{new_shape[3]}")
+                print(f"New layer print: {new_layer}")
+                new_layer.weight.data = torch.matmul(layer.forward_conv.weight.data.view(layer.forward_conv.weight.data.shape[0], -1), layer.weight.data).view(new_shape)
+
+                if layer.forward_conv.bias is not None:
+                    new_layer.bias.data = layer.forward_conv.bias.data
+                
                 setattr(module, name, new_layer)
             elif hasattr(layer, 'children') and callable(layer.children):
                 # Recursively apply the same logic to child modules
