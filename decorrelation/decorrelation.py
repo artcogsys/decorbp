@@ -105,17 +105,30 @@ class Decorrelation(nn.Module):
         Returns:
             Tensor: Decorrelated output tensor.
         """
+        if input.dim() > 2:
+            # Handle 3D or 4D inputs
+            batch_size = input.size(0)
+            input_flat = input.view(batch_size, -1, input.size(-1))
+            num_patches, num_features = input_flat.shape[1], input_flat.shape[2]
+            input_flat = input_flat.view(batch_size * num_patches, -1)
+        else:
+            # Handle 2D inputs
+            batch_size = input.size(0)
+            num_patches = 1  # No patches in 2D input
+            num_features = input.size(1)
+            input_flat = input
+
         if self.training:
             if self.downsample_perc != 1.0:
-                self.decor_state = F.linear(self.downsample(input).view(-1, np.prod(input.shape[1:])), self.weight)
-                return self.decorrelate(input)
+                self.decor_state = F.linear(self.downsample(input_flat), self.weight)
+                return self.decorrelate(input_flat).view(batch_size, num_patches, num_features)
             else:
-                self.decor_state = F.linear(input.view(len(input), -1), self.weight)
-                return self.decor_state.view(input.shape)
+                self.decor_state = F.linear(input_flat, self.weight)
+                return self.decor_state.view(batch_size, num_patches, num_features)
         else:
-            return self.decorrelate(input)
+            return self.decorrelate(input_flat).view(batch_size, num_patches, num_features)
         
-    def decorrelate(self, input: Tensor):
+    def decorrelate(self, input: torch.Tensor) -> torch.Tensor:
         """Applies the decorrelating transform.
 
         Args:
@@ -124,7 +137,7 @@ class Decorrelation(nn.Module):
         Returns:
             Tensor: Decorrelated output tensor.
         """
-        return F.linear(input.view(len(input), -1), self.weight).view(input.shape)
+        return F.linear(input, self.weight)
 
     def update(self, loss_only=False):
         """Implements decorrelation update.
@@ -217,7 +230,8 @@ class DecorLinear(Decorrelation):
         Returns:
             Tensor: Output tensor after decorrelation and linear transformation.
         """
-        return self.linear.forward(super().forward(input))      
+        decorrelated_input = super().forward(input)
+        return self.linear(decorrelated_input)      
     
 
 class DecorConv2d(Decorrelation):
