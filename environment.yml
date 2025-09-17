@@ -211,4 +211,3 @@ dependencies:
     - urllib3==2.1.0
     - wheel==0.41.2
     - zstandard==0.19.0
-prefix: /home/marger/.conda/envs/pytorch
