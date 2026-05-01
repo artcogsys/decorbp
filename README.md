@@ -7,3 +7,5 @@ When using the decorrelation code please cite this repository (https://github.co
 Ahmad, N., Schrader, E., & van Gerven, M. (2023). Constrained parameter inference as a principle for learning. Transactions on Machine Learning Research, 1–18.
 
 Dalm, S., Offergeld, J., Ahmad, N., & van Gerven, M. (2024). Efficient deep learning with decorrelated backpropagation. arXiv. https://arxiv.org/abs/2405.02385
+
+Carrigg, K., van Gastel, R., Yeghaian, M., Dalm, S., Boughorbel, F., & van Gerven, M. (2025). Decorrelation Speeds Up Vision Transformers. arXiv preprint arXiv:2510.14657
