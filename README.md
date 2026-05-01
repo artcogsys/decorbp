@@ -8,4 +8,4 @@ Ahmad, N., Schrader, E., & van Gerven, M. (2023). Constrained parameter inferenc
 
 Dalm, S., Offergeld, J., Ahmad, N., & van Gerven, M. (2024). Efficient deep learning with decorrelated backpropagation. arXiv. https://arxiv.org/abs/2405.02385
 
-Carrigg, K., van Gastel, R., Yeghaian, M., Dalm, S., Boughorbel, F., & van Gerven, M. (2025). Decorrelation Speeds Up Vision Transformers. arXiv preprint arXiv:2510.14657
+Carrigg, K., van Gastel, R., Yeghaian, M., Dalm, S., Boughorbel, F., & van Gerven, M. (2025). Decorrelation Speeds Up Vision Transformers. arXiv [preprint arXiv:2510.14657](https://arxiv.org/abs/2510.14657)
